@@ -92,14 +92,40 @@ src/
 └── App.tsx             # Main application component
 ```
 
-## Current Limitations
+## Production Setup
 
-This is a frontend-only demo application. The following features use mock implementations:
+This application is designed for production use with the following backend integrations:
 
-- **Data Persistence**: Uses localStorage (needs backend database)
-- **Payment Processing**: Stripe integration requires API keys and backend
-- **Notifications**: SMS/Email services need backend integration
-- **Authentication**: No user authentication system yet
+### Required Integrations
+
+1. **Database**: Supabase (recommended) or your preferred backend
+   - Replace localStorage with real database persistence
+   - Set up tables for appointments, customers, services, and analytics
+   - Configure Row Level Security (RLS) for data protection
+
+2. **Payment Processing**: Stripe
+   - Live Stripe account with API keys
+   - Webhook endpoints for payment confirmations
+   - PCI compliance considerations
+
+3. **Notifications**: Twilio (SMS) + Email service
+   - Twilio account for SMS notifications
+   - Email service (SendGrid, Mailgun, or SMTP)
+   - Template management for notifications
+
+4. **Authentication**: Supabase Auth or Auth0
+   - User authentication and authorization
+   - Role-based access control (customer vs owner)
+   - Secure session management
+
+### Architecture Recommendations
+
+For production deployment, implement:
+- **Backend API**: Node.js/Express, Next.js API routes, or Supabase Edge Functions
+- **Database**: PostgreSQL (via Supabase) with proper indexing and backups
+- **File Storage**: Supabase Storage or AWS S3 for invoices and receipts
+- **Monitoring**: Sentry for error tracking, Vercel Analytics for performance
+- **Security**: HTTPS, CORS configuration, rate limiting, input validation
 
 ## Environment Variables
 

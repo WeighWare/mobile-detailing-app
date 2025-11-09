@@ -22,16 +22,26 @@ import Stripe from 'stripe';
 import { createClient } from '@supabase/supabase-js';
 import { buffer } from 'micro';
 
+// Validate required environment variables
+const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const stripeWebhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+
+if (!stripeSecretKey || !supabaseUrl || !supabaseServiceRoleKey || !stripeWebhookSecret) {
+  throw new Error(
+    'Missing required environment variables for stripe-webhook API. ' +
+    'Required: STRIPE_SECRET_KEY, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, STRIPE_WEBHOOK_SECRET'
+  );
+}
+
 // Initialize Stripe
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+const stripe = new Stripe(stripeSecretKey, {
   apiVersion: '2024-11-20.acacia',
 });
 
 // Initialize Supabase admin client
-const supabase = createClient(
-  process.env.VITE_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+const supabase = createClient(supabaseUrl, supabaseServiceRoleKey);
 
 // Disable body parsing, need raw body for webhook signature verification
 export const config = {
@@ -50,13 +60,12 @@ export default async function handler(
 
   const buf = await buffer(req);
   const sig = req.headers['stripe-signature'] as string;
-  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET!;
 
   let event: Stripe.Event;
 
   // Verify webhook signature
   try {
-    event = stripe.webhooks.constructEvent(buf, sig, webhookSecret);
+    event = stripe.webhooks.constructEvent(buf, sig, stripeWebhookSecret);
   } catch (err) {
     console.error('Webhook signature verification failed:', err);
     return res.status(400).json({

@@ -92,10 +92,9 @@ export interface Database {
         Row: {
           id: string;
           customer_id: string | null;
-          service_id: string | null;
           appointment_date: string;
           status: 'scheduled' | 'confirmed' | 'in_progress' | 'completed' | 'cancelled';
-          location: string | null;
+          location: Json | null;  // Changed to JSONB
           vehicle_info: Json | null;
           notes: string | null;
           total_price: number | null;
@@ -107,10 +106,9 @@ export interface Database {
         Insert: {
           id?: string;
           customer_id?: string | null;
-          service_id?: string | null;
           appointment_date: string;
           status: 'scheduled' | 'confirmed' | 'in_progress' | 'completed' | 'cancelled';
-          location?: string | null;
+          location?: Json | null;
           vehicle_info?: Json | null;
           notes?: string | null;
           total_price?: number | null;
@@ -122,10 +120,9 @@ export interface Database {
         Update: {
           id?: string;
           customer_id?: string | null;
-          service_id?: string | null;
           appointment_date?: string;
           status?: 'scheduled' | 'confirmed' | 'in_progress' | 'completed' | 'cancelled';
-          location?: string | null;
+          location?: Json | null;
           vehicle_info?: Json | null;
           notes?: string | null;
           total_price?: number | null;
@@ -133,6 +130,29 @@ export interface Database {
           payment_intent_id?: string | null;
           created_at?: string;
           updated_at?: string;
+        };
+      };
+      appointment_services: {
+        Row: {
+          id: string;
+          appointment_id: string;
+          service_id: string;
+          price_at_booking: number;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          appointment_id: string;
+          service_id: string;
+          price_at_booking: number;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          appointment_id?: string;
+          service_id?: string;
+          price_at_booking?: number;
+          created_at?: string;
         };
       };
       notifications: {

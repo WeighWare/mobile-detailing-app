@@ -87,10 +87,9 @@ CREATE TABLE IF NOT EXISTS services (
 CREATE TABLE IF NOT EXISTS appointments (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   customer_id UUID REFERENCES customers(id) ON DELETE CASCADE,
-  service_id UUID REFERENCES services(id),
   appointment_date TIMESTAMP WITH TIME ZONE NOT NULL,
   status TEXT NOT NULL CHECK (status IN ('scheduled', 'confirmed', 'in_progress', 'completed', 'cancelled')),
-  location TEXT,
+  location JSONB,  -- Changed from TEXT to JSONB for structured data
   vehicle_info JSONB,
   notes TEXT,
   total_price DECIMAL(10,2),
@@ -102,6 +101,22 @@ CREATE TABLE IF NOT EXISTS appointments (
   -- Constraints
   CONSTRAINT future_appointment CHECK (appointment_date > created_at),
   CONSTRAINT valid_total_price CHECK (total_price >= 0)
+);
+
+-- ============================================
+-- APPOINTMENT_SERVICES JOIN TABLE
+-- Many-to-many relationship for multiple services per appointment
+-- ============================================
+CREATE TABLE IF NOT EXISTS appointment_services (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  appointment_id UUID REFERENCES appointments(id) ON DELETE CASCADE NOT NULL,
+  service_id UUID REFERENCES services(id) ON DELETE CASCADE NOT NULL,
+  price_at_booking DECIMAL(10,2) NOT NULL,  -- Capture price at time of booking
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+
+  -- Constraints
+  CONSTRAINT unique_appointment_service UNIQUE(appointment_id, service_id),
+  CONSTRAINT valid_price_at_booking CHECK (price_at_booking >= 0)
 );
 
 -- ============================================
@@ -127,6 +142,8 @@ CREATE INDEX IF NOT EXISTS idx_appointments_customer ON appointments(customer_id
 CREATE INDEX IF NOT EXISTS idx_appointments_date ON appointments(appointment_date);
 CREATE INDEX IF NOT EXISTS idx_appointments_status ON appointments(status);
 CREATE INDEX IF NOT EXISTS idx_appointments_payment_status ON appointments(payment_status);
+CREATE INDEX IF NOT EXISTS idx_appointment_services_appointment ON appointment_services(appointment_id);
+CREATE INDEX IF NOT EXISTS idx_appointment_services_service ON appointment_services(service_id);
 CREATE INDEX IF NOT EXISTS idx_notifications_appointment ON notifications(appointment_id);
 CREATE INDEX IF NOT EXISTS idx_notifications_customer ON notifications(customer_id);
 CREATE INDEX IF NOT EXISTS idx_customers_email ON customers(email);
@@ -186,6 +203,7 @@ Supabase uses Row Level Security (RLS) to protect your data. Run this SQL:
 -- Enable RLS on all tables
 ALTER TABLE customers ENABLE ROW LEVEL SECURITY;
 ALTER TABLE appointments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE appointment_services ENABLE ROW LEVEL SECURITY;
 ALTER TABLE services ENABLE ROW LEVEL SECURITY;
 ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
 
@@ -196,17 +214,17 @@ ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
 -- Customers can view their own data
 CREATE POLICY "Users can view own customer data" ON customers
   FOR SELECT
-  USING (auth.uid()::text = id::text);
+  USING (auth.uid() = id);
 
 -- Customers can update their own data
 CREATE POLICY "Users can update own customer data" ON customers
   FOR UPDATE
-  USING (auth.uid()::text = id::text);
+  USING (auth.uid() = id);
 
 -- Customers can insert their own data
 CREATE POLICY "Users can insert own customer data" ON customers
   FOR INSERT
-  WITH CHECK (auth.uid()::text = id::text);
+  WITH CHECK (auth.uid() = id);
 
 -- ============================================
 -- APPOINTMENTS POLICIES
@@ -216,26 +234,57 @@ CREATE POLICY "Users can insert own customer data" ON customers
 CREATE POLICY "Users can view own appointments" ON appointments
   FOR SELECT
   USING (
-    customer_id::text = auth.uid()::text OR
+    customer_id = auth.uid() OR
     auth.jwt() ->> 'role' = 'owner'
   );
 
 -- Customers can create appointments
 CREATE POLICY "Users can create appointments" ON appointments
   FOR INSERT
-  WITH CHECK (customer_id::text = auth.uid()::text);
+  WITH CHECK (customer_id = auth.uid());
 
 -- Customers can update their own appointments (before completion)
 CREATE POLICY "Users can update own appointments" ON appointments
   FOR UPDATE
   USING (
-    customer_id::text = auth.uid()::text AND status != 'completed'
+    customer_id = auth.uid() AND status != 'completed'
     OR auth.jwt() ->> 'role' = 'owner'
   );
 
 -- Owners can delete appointments
 CREATE POLICY "Owners can delete appointments" ON appointments
   FOR DELETE
+  USING (auth.jwt() ->> 'role' = 'owner');
+
+-- ============================================
+-- APPOINTMENT_SERVICES POLICIES
+-- ============================================
+
+-- Users can view services for their own appointments
+CREATE POLICY "Users can view own appointment services" ON appointment_services
+  FOR SELECT
+  USING (
+    EXISTS (
+      SELECT 1 FROM appointments
+      WHERE appointments.id = appointment_services.appointment_id
+      AND (appointments.customer_id = auth.uid() OR auth.jwt() ->> 'role' = 'owner')
+    )
+  );
+
+-- Allow inserting services when creating appointments
+CREATE POLICY "Users can add services to own appointments" ON appointment_services
+  FOR INSERT
+  WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM appointments
+      WHERE appointments.id = appointment_services.appointment_id
+      AND appointments.customer_id = auth.uid()
+    )
+  );
+
+-- Owners can manage all appointment services
+CREATE POLICY "Owners can manage appointment services" ON appointment_services
+  FOR ALL
   USING (auth.jwt() ->> 'role' = 'owner');
 
 -- ============================================
@@ -260,7 +309,7 @@ CREATE POLICY "Owners can manage services" ON services
 CREATE POLICY "Users can view own notifications" ON notifications
   FOR SELECT
   USING (
-    customer_id::text = auth.uid()::text OR
+    customer_id = auth.uid() OR
     auth.jwt() ->> 'role' = 'owner'
   );
 

@@ -25,17 +25,25 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import twilio from 'twilio';
 import { createClient } from '@supabase/supabase-js';
 
+// Validate required environment variables
+const twilioAccountSid = process.env.TWILIO_ACCOUNT_SID;
+const twilioAuthToken = process.env.TWILIO_AUTH_TOKEN;
+const twilioPhoneNumber = process.env.TWILIO_PHONE_NUMBER;
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+if (!twilioAccountSid || !twilioAuthToken || !twilioPhoneNumber || !supabaseUrl || !supabaseServiceRoleKey) {
+  throw new Error(
+    'Missing required environment variables for send-sms API. ' +
+    'Required: TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY'
+  );
+}
+
 // Initialize Twilio client
-const twilioClient = twilio(
-  process.env.TWILIO_ACCOUNT_SID!,
-  process.env.TWILIO_AUTH_TOKEN!
-);
+const twilioClient = twilio(twilioAccountSid, twilioAuthToken);
 
 // Initialize Supabase admin client (for logging)
-const supabase = createClient(
-  process.env.VITE_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+const supabase = createClient(supabaseUrl, supabaseServiceRoleKey);
 
 export default async function handler(
   req: VercelRequest,
@@ -66,7 +74,7 @@ export default async function handler(
     // Send SMS via Twilio
     const twilioMessage = await twilioClient.messages.create({
       body: message,
-      from: process.env.TWILIO_PHONE_NUMBER!,
+      from: twilioPhoneNumber,
       to: to,
     });
 

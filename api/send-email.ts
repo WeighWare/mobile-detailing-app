@@ -26,14 +26,24 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import sgMail from '@sendgrid/mail';
 import { createClient } from '@supabase/supabase-js';
 
+// Validate required environment variables
+const sendgridApiKey = process.env.SENDGRID_API_KEY;
+const sendgridVerifiedSender = process.env.SENDGRID_VERIFIED_SENDER;
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+if (!sendgridApiKey || !sendgridVerifiedSender || !supabaseUrl || !supabaseServiceRoleKey) {
+  throw new Error(
+    'Missing required environment variables for send-email API. ' +
+    'Required: SENDGRID_API_KEY, SENDGRID_VERIFIED_SENDER, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY'
+  );
+}
+
 // Initialize SendGrid
-sgMail.setApiKey(process.env.SENDGRID_API_KEY!);
+sgMail.setApiKey(sendgridApiKey);
 
 // Initialize Supabase admin client (for logging)
-const supabase = createClient(
-  process.env.VITE_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+const supabase = createClient(supabaseUrl, supabaseServiceRoleKey);
 
 export default async function handler(
   req: VercelRequest,
@@ -66,7 +76,7 @@ export default async function handler(
     const msg = {
       to: to,
       from: {
-        email: process.env.SENDGRID_VERIFIED_SENDER!,
+        email: sendgridVerifiedSender,
         name: 'Mobile Detailing Pro',
       },
       subject: subject,

@@ -77,7 +77,7 @@ export class StorageService {
           appointment_services (
             service_id,
             price_at_booking,
-            services (id, name, description, price, duration_minutes)
+            services (id, name, description, price, duration_minutes, category, active)
           )
         `)
         .order('appointment_date', { ascending: false });
@@ -105,7 +105,7 @@ export class StorageService {
           appointment_services (
             service_id,
             price_at_booking,
-            services (id, name, description, price, duration_minutes)
+            services (id, name, description, price, duration_minutes, category, active)
           )
         `)
         .eq('id', id)
@@ -407,7 +407,7 @@ export class StorageService {
 
       const { error } = await supabase
         .from('business_settings')
-        .upsert(dbSettings);
+        .upsert(dbSettings, { onConflict: 'user_id' });
 
       if (error) throw error;
 
@@ -615,7 +615,7 @@ export class StorageService {
       }
 
       if (data.settings) {
-        this.saveBusinessSettings(data.settings);
+        await this.saveBusinessSettings(customerId, data.settings);
       }
 
       if (data.preferences) {
@@ -734,6 +734,8 @@ export class StorageService {
         description: as.services?.description || '',
         price: as.price_at_booking || as.services?.price || 0,
         duration: as.services?.duration_minutes || 60,
+        category: as.services?.category || 'addon',
+        isActive: as.services?.active ?? true,
       })),
       createdAt: db.created_at,
       updatedAt: db.updated_at,
@@ -774,6 +776,8 @@ export class StorageService {
       email: db.email,
       name: db.name,
       phone: db.phone || '',
+      // TODO: Add preferredContactMethod to the database schema or remove from type
+      // Currently hardcoded to 'both' as there's no corresponding database field
       preferredContactMethod: 'both',
       loyaltyPoints: db.loyalty_points,
       createdAt: db.created_at,
@@ -785,7 +789,9 @@ export class StorageService {
           newsletter: false,
         },
       },
-      isActive: true, // Default to true (no field in DB yet)
+      // TODO: Add an 'active' status column to the customers table
+      // Currently hardcoded to true as there's no corresponding database field
+      isActive: true,
     } as CustomerBasicProfile;
   }
 
@@ -798,7 +804,7 @@ export class StorageService {
       email: app.email,
       name: app.name,
       phone: app.phone || null,
-      address: null,
+      address: app.addresses?.[0] || null, // Save first address from array
       loyalty_points: app.loyaltyPoints,
       notification_preferences: app.preferences.notifications as any,
     };

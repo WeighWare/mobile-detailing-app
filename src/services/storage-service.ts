@@ -55,7 +55,7 @@ export class StorageService {
           appointment_services (
             service_id,
             price_at_booking,
-            services (id, name, description, price, duration)
+            services (id, name, description, price, duration_minutes)
           )
         `)
         .order('appointment_date', { ascending: false });
@@ -83,7 +83,7 @@ export class StorageService {
           appointment_services (
             service_id,
             price_at_booking,
-            services (id, name, description, price, duration)
+            services (id, name, description, price, duration_minutes)
           )
         `)
         .eq('id', id)
@@ -146,7 +146,11 @@ export class StorageService {
       }
 
       // Fetch the complete appointment with joins
-      return await this.getAppointmentById(data.id) || this.transformDbAppointmentToApp(data);
+      const savedAppointment = await this.getAppointmentById(data.id);
+      if (!savedAppointment) {
+        throw new Error('Failed to fetch complete appointment details after saving.');
+      }
+      return savedAppointment;
     } catch (error) {
       console.error('Error saving appointment:', error);
       throw new Error('Failed to save appointment to database');
@@ -599,7 +603,7 @@ export class StorageService {
         name: as.services?.name || '',
         description: as.services?.description || '',
         price: as.price_at_booking || as.services?.price || 0,
-        duration: as.services?.duration || 60,
+        duration: as.services?.duration_minutes || 60,
       })),
       createdAt: db.created_at,
       updatedAt: db.updated_at,
@@ -618,13 +622,12 @@ export class StorageService {
     return {
       id: app.id,
       customer_id: customerId, // From parameter (required for RLS policies)
-      service_id: app.services?.[0]?.id || null, // Deprecated: services now in appointment_services table
       appointment_date: `${app.date}T${app.time}:00`,
       status: app.status as any,
       location: app.location || null, // Supabase handles JSONB conversion
       vehicle_info: app.vehicleInfo as any,
       notes: app.notes || null,
-      total_price: app.payment?.amount || null,
+      total_price: app.services?.reduce((sum, s) => sum + s.price, 0) || 0, // Calculate from services
       payment_status: app.payment?.status || 'pending',
       payment_intent_id: app.payment?.stripePaymentIntentId || null,
     };

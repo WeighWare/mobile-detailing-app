@@ -55,7 +55,7 @@ export default async function handler(
   }
 
   try {
-    const { to, subject, html, text, appointmentId, customerId } = req.body;
+    const { to, subject, html, text, appointmentId, customerId, purpose } = req.body;
 
     // Validate required fields
     if (!to || !subject || !html) {
@@ -105,6 +105,7 @@ export default async function handler(
         appointment_id: appointmentId || null,
         customer_id: customerId || null,
         type: 'email',
+        purpose: purpose || 'reminder', // Notification purpose (e.g., 'reminder', 'confirmation', 'status_change')
         status: response.statusCode === 202 ? 'sent' : 'failed',
         message: messageContent,
         sent_at: new Date().toISOString(),
@@ -129,6 +130,7 @@ export default async function handler(
         appointment_id: req.body.appointmentId || null,
         customer_id: req.body.customerId || null,
         type: 'email',
+        purpose: req.body.purpose || 'reminder',
         status: 'failed',
         message: req.body.subject || '',
         error_message: error instanceof Error ? error.message : 'Unknown error',

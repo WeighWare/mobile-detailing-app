@@ -52,7 +52,9 @@ CREATE TABLE IF NOT EXISTS customers (
   email TEXT UNIQUE NOT NULL,
   name TEXT NOT NULL,
   phone TEXT,
-  address JSONB, -- Structured address data (street, city, state, zip, etc.)
+  address JSONB, -- Array of Address objects: [{label, address, city, state, zipCode, ...}]
+  preferred_contact_method TEXT DEFAULT 'both' CHECK (preferred_contact_method IN ('email', 'sms', 'both')),
+  is_active BOOLEAN DEFAULT true,
   loyalty_points INTEGER DEFAULT 0,
   notification_preferences JSONB DEFAULT '{"sms": true, "email": true, "reminders": true}'::jsonb,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -126,7 +128,8 @@ CREATE TABLE IF NOT EXISTS notifications (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   appointment_id UUID REFERENCES appointments(id) ON DELETE CASCADE,
   customer_id UUID REFERENCES customers(id) ON DELETE CASCADE,
-  type TEXT NOT NULL CHECK (type IN ('sms', 'email')),
+  type TEXT NOT NULL CHECK (type IN ('sms', 'email')), -- Delivery method
+  purpose TEXT DEFAULT 'reminder' CHECK (purpose IN ('reminder', 'status_change', 'delay', 'confirmation', 'cancellation', 'payment')), -- Notification purpose
   status TEXT NOT NULL CHECK (status IN ('pending', 'sent', 'failed')),
   message TEXT NOT NULL,
   sent_at TIMESTAMP WITH TIME ZONE,

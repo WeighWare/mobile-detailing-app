@@ -776,9 +776,7 @@ export class StorageService {
       email: db.email,
       name: db.name,
       phone: db.phone || '',
-      // TODO: Add preferredContactMethod to the database schema or remove from type
-      // Currently hardcoded to 'both' as there's no corresponding database field
-      preferredContactMethod: 'both',
+      preferredContactMethod: db.preferred_contact_method || 'both',
       loyaltyPoints: db.loyalty_points,
       createdAt: db.created_at,
       preferences: {
@@ -789,25 +787,13 @@ export class StorageService {
           newsletter: false,
         },
       },
-      // TODO: Add an 'active' status column to the customers table
-      // Currently hardcoded to true as there's no corresponding database field
-      isActive: true,
+      isActive: db.is_active ?? true,
     } as CustomerBasicProfile;
   }
 
   /**
    * Transform app customer to database format
-   *
-   * NOTE: Multiple Address Limitation
-   * - CustomerProfile supports multiple addresses (addresses: Address[])
-   * - Database customers.address field stores only a single Address
-   * - Currently saves only the first address (app.addresses?.[0])
-   * - This leads to data loss if customer has multiple addresses
-   *
-   * FUTURE IMPROVEMENT OPTIONS:
-   * 1. Change customers.address from Address to Address[] to store all addresses
-   * 2. Create separate customer_addresses table with one-to-many relationship
-   * 3. Store array in appointment.location instead for location-specific data
+   * Saves all customer addresses to the database as an array.
    */
   private transformAppCustomerToDb(app: CustomerProfile): Database['public']['Tables']['customers']['Insert'] {
     return {
@@ -815,7 +801,9 @@ export class StorageService {
       email: app.email,
       name: app.name,
       phone: app.phone || null,
-      address: app.addresses?.[0] || null, // LIMITATION: Only saves first address
+      address: app.addresses || null, // Save all addresses as array
+      preferred_contact_method: app.preferredContactMethod || 'both',
+      is_active: app.isActive,
       loyalty_points: app.loyaltyPoints,
       notification_preferences: app.preferences.notifications as any,
     };
@@ -828,7 +816,7 @@ export class StorageService {
     return {
       id: db.id,
       appointmentId: db.appointment_id || '',
-      type: 'reminder',
+      type: db.purpose || 'reminder', // Use purpose from database (defaults to 'reminder' for backwards compatibility)
       method: db.type === 'sms' ? 'sms' : 'email',
       sentAt: db.sent_at || db.created_at,
       status: db.status === 'sent' ? 'sent' : db.status === 'failed' ? 'failed' : 'pending',

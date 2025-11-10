@@ -30,7 +30,9 @@ export interface Database {
           email: string;
           name: string;
           phone: string | null;
-          address: Address | null; // Structured address data with type safety
+          address: Address[] | null; // Array of address objects for multiple addresses
+          preferred_contact_method: 'email' | 'sms' | 'both';
+          is_active: boolean;
           loyalty_points: number;
           notification_preferences: Json;
           created_at: string;
@@ -41,7 +43,9 @@ export interface Database {
           email: string;
           name: string;
           phone?: string | null;
-          address?: Address | null; // Structured address data with type safety
+          address?: Address[] | null; // Array of address objects for multiple addresses
+          preferred_contact_method?: 'email' | 'sms' | 'both';
+          is_active?: boolean;
           loyalty_points?: number;
           notification_preferences?: Json;
           created_at?: string;
@@ -52,7 +56,9 @@ export interface Database {
           email?: string;
           name?: string;
           phone?: string | null;
-          address?: Address | null; // Structured address data with type safety
+          address?: Address[] | null; // Array of address objects for multiple addresses
+          preferred_contact_method?: 'email' | 'sms' | 'both';
+          is_active?: boolean;
           loyalty_points?: number;
           notification_preferences?: Json;
           created_at?: string;
@@ -163,7 +169,8 @@ export interface Database {
           id: string;
           appointment_id: string | null;
           customer_id: string | null;
-          type: 'sms' | 'email';
+          type: 'sms' | 'email'; // Delivery method
+          purpose: 'reminder' | 'status_change' | 'delay' | 'confirmation' | 'cancellation' | 'payment'; // Notification purpose
           status: 'pending' | 'sent' | 'failed';
           message: string;
           sent_at: string | null;
@@ -175,6 +182,7 @@ export interface Database {
           appointment_id?: string | null;
           customer_id?: string | null;
           type: 'sms' | 'email';
+          purpose?: 'reminder' | 'status_change' | 'delay' | 'confirmation' | 'cancellation' | 'payment';
           status: 'pending' | 'sent' | 'failed';
           message: string;
           sent_at?: string | null;
@@ -186,6 +194,7 @@ export interface Database {
           appointment_id?: string | null;
           customer_id?: string | null;
           type?: 'sms' | 'email';
+          purpose?: 'reminder' | 'status_change' | 'delay' | 'confirmation' | 'cancellation' | 'payment';
           status?: 'pending' | 'sent' | 'failed';
           message?: string;
           sent_at?: string | null;

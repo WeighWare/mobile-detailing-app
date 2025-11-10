@@ -55,7 +55,7 @@ export default async function handler(
   }
 
   try {
-    const { to, message, appointmentId, customerId } = req.body;
+    const { to, message, appointmentId, customerId, purpose } = req.body;
 
     // Validate required fields
     if (!to || !message) {
@@ -85,6 +85,7 @@ export default async function handler(
         appointment_id: appointmentId || null,
         customer_id: customerId || null,
         type: 'sms',
+        purpose: purpose || 'reminder', // Notification purpose (e.g., 'reminder', 'confirmation', 'status_change')
         status: twilioMessage.status === 'queued' || twilioMessage.status === 'sent' ? 'sent' : 'failed',
         message: message,
         sent_at: new Date().toISOString(),
@@ -109,6 +110,7 @@ export default async function handler(
         appointment_id: req.body.appointmentId || null,
         customer_id: req.body.customerId || null,
         type: 'sms',
+        purpose: req.body.purpose || 'reminder',
         status: 'failed',
         message: req.body.message || '',
         error_message: error instanceof Error ? error.message : 'Unknown error',

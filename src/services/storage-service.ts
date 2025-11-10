@@ -292,10 +292,52 @@ export class StorageService {
 
   /**
    * Get business settings
-   * NOTE: In production, this should be stored in a settings table or user metadata
-   * For now, we'll keep using localStorage as a temporary solution
+   *
+   * ⚠️ CRITICAL LIMITATION - NOT SUITABLE FOR PRODUCTION SAAS
+   *
+   * This method uses localStorage, which is device-specific and not tied to user accounts.
+   * This is NOT suitable for a multi-user SaaS application because:
+   * 1. Settings are lost when user switches devices/browsers
+   * 2. Settings are not shared across user's devices
+   * 3. Multiple users on same device would share settings
+   * 4. No backup/recovery of settings
+   * 5. No audit trail of setting changes
+   *
+   * FOR PRODUCTION, business settings MUST be migrated to a database table:
+   *
+   * CREATE TABLE business_settings (
+   *   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+   *   user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
+   *   business_name TEXT,
+   *   business_address JSONB,
+   *   business_phone TEXT,
+   *   business_email TEXT,
+   *   operating_hours JSONB,
+   *   service_area JSONB,
+   *   default_buffer_time INTEGER,
+   *   auto_confirm_bookings BOOLEAN,
+   *   require_deposit BOOLEAN,
+   *   deposit_percentage DECIMAL(5,2),
+   *   cancellation_policy TEXT,
+   *   terms_and_conditions TEXT,
+   *   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+   *   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+   *   CONSTRAINT unique_user_settings UNIQUE(user_id)
+   * );
+   *
+   * Then implement getBusinessSettings() to fetch from DB with RLS policies.
+   *
+   * TODO: Create business_settings table in DATABASE_SETUP.md
+   * TODO: Add RLS policies for business_settings
+   * TODO: Implement async getBusinessSettings(userId: string)
+   * TODO: Implement async saveBusinessSettings(userId: string, settings: BusinessSettings)
+   * TODO: Migration script to move localStorage settings to database
    */
   getBusinessSettings(): Partial<BusinessSettings> {
+    console.warn(
+      'PRODUCTION WARNING: Business settings are stored in localStorage. ' +
+      'This is NOT suitable for SaaS applications. Settings must be moved to database.'
+    );
     try {
       const saved = localStorage.getItem('mobile-detailers-settings');
       return saved ? JSON.parse(saved) : {};
@@ -307,9 +349,15 @@ export class StorageService {
 
   /**
    * Save business settings
-   * NOTE: This is temporary - should be moved to Supabase in production
+   *
+   * ⚠️ CRITICAL LIMITATION - NOT SUITABLE FOR PRODUCTION SAAS
+   * See getBusinessSettings() documentation for details and migration plan.
    */
   saveBusinessSettings(settings: Partial<BusinessSettings>): boolean {
+    console.warn(
+      'PRODUCTION WARNING: Business settings are stored in localStorage. ' +
+      'This is NOT suitable for SaaS applications. Settings must be moved to database.'
+    );
     try {
       localStorage.setItem('mobile-detailers-settings', JSON.stringify(settings));
       return true;
@@ -635,6 +683,23 @@ export class StorageService {
 
   /**
    * Transform database customer to app format
+   *
+   * NOTE: This returns a simplified CustomerProfile with computed fields set to defaults.
+   * The following fields are NOT computed from the database for performance reasons:
+   * - totalBookings: Set to 0 (should be COUNT of appointments for this customer)
+   * - totalSpent: Not included (should be SUM of appointment total_price)
+   * - averageRating: Set to 0 (requires ratings table that doesn't exist yet)
+   * - lastBookingDate: Not included (should be MAX appointment_date)
+   * - vehicleHistory: Empty array (should aggregate vehicle_info from appointments)
+   * - addresses: Not included (should aggregate location from appointments)
+   * - preferences: Set from notification_preferences only
+   * - isActive: Not included (no field in DB)
+   * - tier: Not included (no field in DB)
+   *
+   * For a complete customer profile with computed stats, use getCustomerWithStats() instead.
+   *
+   * TODO: Consider creating a separate CustomerBasicProfile type for data directly from DB
+   * TODO: Implement getCustomerWithStats() to compute totalBookings, totalSpent, etc.
    */
   private transformDbCustomerToApp(db: DbCustomer): CustomerProfile {
     return {
@@ -644,14 +709,26 @@ export class StorageService {
       phone: db.phone || '',
       preferredContactMethod: 'both',
       loyaltyPoints: db.loyalty_points,
-      totalBookings: 0,
-      averageRating: 0,
+      totalBookings: 0, // TODO: Compute from appointments count
+      totalSpent: 0, // TODO: Compute from SUM(appointments.total_price)
+      averageRating: 0, // TODO: Implement ratings system
       createdAt: db.created_at,
-      vehicleHistory: [],
-      preferredServices: [],
-      notesHistory: [],
-      notifications: db.notification_preferences as any || {},
-    };
+      vehicleHistory: [], // TODO: Extract from appointments.vehicle_info
+      preferences: {
+        preferredServices: [], // TODO: Compute from appointment_services frequency
+        preferredTimes: [], // TODO: Analyze appointment times
+        preferredDays: [], // TODO: Analyze appointment days
+        notifications: (db.notification_preferences as any) || {
+          reminders: true,
+          promotions: true,
+          statusUpdates: true,
+          newsletter: false,
+        },
+      },
+      addresses: [], // TODO: Extract from appointments.location
+      isActive: true, // Default to true (no field in DB yet)
+      tier: undefined, // TODO: Implement tier calculation based on totalSpent
+    } as CustomerProfile;
   }
 
   /**

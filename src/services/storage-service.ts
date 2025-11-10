@@ -797,6 +797,17 @@ export class StorageService {
 
   /**
    * Transform app customer to database format
+   *
+   * NOTE: Multiple Address Limitation
+   * - CustomerProfile supports multiple addresses (addresses: Address[])
+   * - Database customers.address field stores only a single Address
+   * - Currently saves only the first address (app.addresses?.[0])
+   * - This leads to data loss if customer has multiple addresses
+   *
+   * FUTURE IMPROVEMENT OPTIONS:
+   * 1. Change customers.address from Address to Address[] to store all addresses
+   * 2. Create separate customer_addresses table with one-to-many relationship
+   * 3. Store array in appointment.location instead for location-specific data
    */
   private transformAppCustomerToDb(app: CustomerProfile): Database['public']['Tables']['customers']['Insert'] {
     return {
@@ -804,7 +815,7 @@ export class StorageService {
       email: app.email,
       name: app.name,
       phone: app.phone || null,
-      address: app.addresses?.[0] || null, // Save first address from array
+      address: app.addresses?.[0] || null, // LIMITATION: Only saves first address
       loyalty_points: app.loyaltyPoints,
       notification_preferences: app.preferences.notifications as any,
     };

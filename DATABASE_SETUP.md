@@ -275,6 +275,7 @@ RETURNS JSONB AS $$
 DECLARE
   v_customer_id UUID;
   v_result JSONB;
+  v_is_authorized BOOLEAN;
 BEGIN
   -- Get customer ID from email
   SELECT id INTO v_customer_id
@@ -283,6 +284,17 @@ BEGIN
 
   IF v_customer_id IS NULL THEN
     RETURN NULL;
+  END IF;
+
+  -- SECURITY CHECK: Ensure user is authorized to view this customer's data
+  -- This is critical because function uses SECURITY DEFINER and bypasses RLS
+  -- Allow access if: (1) user is the customer themselves OR (2) user has 'owner' role
+  SELECT (
+    v_customer_id = auth.uid() OR (auth.jwt() ->> 'role' = 'owner')
+  ) INTO v_is_authorized;
+
+  IF NOT v_is_authorized THEN
+    RAISE EXCEPTION 'Permission denied: You can only view your own customer profile';
   END IF;
 
   -- Build complete profile with all stats in one query
@@ -636,6 +648,86 @@ VITE_SUPABASE_URL=https://xxxxx.supabase.co
 VITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 ```
+
+---
+
+## Configure JWT Claims for Role-Based Access
+
+The database RPC functions use JWT role claims for authorization. You must configure Supabase to include the `role` claim in the JWT for owner/admin access to work properly.
+
+### Step 1: Add Custom Claims Hook (Recommended Approach)
+
+1. Go to **Database** > **Functions** in your Supabase dashboard
+2. Create a new function to set custom JWT claims:
+
+```sql
+-- Function to add custom claims to JWT
+CREATE OR REPLACE FUNCTION public.custom_access_token_hook(event jsonb)
+RETURNS jsonb
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  user_role text;
+BEGIN
+  -- Get user role from user_metadata
+  user_role := event->'user'->'user_metadata'->>'role';
+
+  -- Add role to JWT claims
+  IF user_role IS NOT NULL THEN
+    event := jsonb_set(
+      event,
+      '{claims,role}',
+      to_jsonb(user_role)
+    );
+  END IF;
+
+  RETURN event;
+END;
+$$;
+```
+
+3. Go to **Authentication** > **Hooks** in your Supabase dashboard
+4. Enable the **"Custom Access Token"** hook
+5. Select the `custom_access_token_hook` function
+
+### Step 2: Set User Roles
+
+When creating admin/owner users, set their role in user_metadata:
+
+```sql
+-- Update user metadata to set role (run in SQL Editor)
+UPDATE auth.users
+SET raw_user_meta_data = raw_user_meta_data || '{"role": "owner"}'::jsonb
+WHERE email = 'admin@yourdomain.com';
+```
+
+Or set it during signup in your application code:
+
+```typescript
+const { data, error } = await supabase.auth.signUp({
+  email: 'admin@yourdomain.com',
+  password: 'secure-password',
+  options: {
+    data: {
+      role: 'owner'
+    }
+  }
+});
+```
+
+### Step 3: Verify JWT Configuration
+
+After configuring, verify the JWT contains the role claim:
+
+```typescript
+const session = await supabase.auth.getSession();
+console.log(session.data.session?.user.user_metadata?.role); // Should show 'owner'
+```
+
+**Note**: Without this configuration:
+- Regular customers can only access their own data (verified by `auth.uid()`)
+- Owner/admin features requiring the `role` claim will not work
+- The RPC functions `update_appointment_services` and `get_customer_profile_with_stats` check for this role
 
 ---
 

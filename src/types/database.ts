@@ -10,6 +10,9 @@
  * For now, we're manually defining the types based on the schema in DEPLOYMENT.md
  */
 
+import type { Address } from './common';
+import type { BusinessHours } from './business';
+
 export type Json =
   | string
   | number
@@ -27,7 +30,7 @@ export interface Database {
           email: string;
           name: string;
           phone: string | null;
-          address: Json; // Structured address data (street, city, state, zip)
+          address: Address | null; // Structured address data with type safety
           loyalty_points: number;
           notification_preferences: Json;
           created_at: string;
@@ -38,7 +41,7 @@ export interface Database {
           email: string;
           name: string;
           phone?: string | null;
-          address?: Json; // Structured address data (street, city, state, zip)
+          address?: Address | null; // Structured address data with type safety
           loyalty_points?: number;
           notification_preferences?: Json;
           created_at?: string;
@@ -49,7 +52,7 @@ export interface Database {
           email?: string;
           name?: string;
           phone?: string | null;
-          address?: Json; // Structured address data (street, city, state, zip)
+          address?: Address | null; // Structured address data with type safety
           loyalty_points?: number;
           notification_preferences?: Json;
           created_at?: string;
@@ -195,10 +198,10 @@ export interface Database {
           id: string;
           user_id: string;
           business_name: string | null;
-          business_address: Json | null;
+          business_address: Address | null; // Type-safe business address
           business_phone: string | null;
           business_email: string | null;
-          operating_hours: Json;
+          operating_hours: BusinessHours; // Type-safe business hours
           service_area: Json | null;
           default_buffer_time: number;
           auto_confirm_bookings: boolean;
@@ -216,10 +219,10 @@ export interface Database {
           id?: string;
           user_id: string;
           business_name?: string | null;
-          business_address?: Json | null;
+          business_address?: Address | null; // Type-safe business address
           business_phone?: string | null;
           business_email?: string | null;
-          operating_hours?: Json;
+          operating_hours?: BusinessHours; // Type-safe business hours
           service_area?: Json | null;
           default_buffer_time?: number;
           auto_confirm_bookings?: boolean;
@@ -237,10 +240,10 @@ export interface Database {
           id?: string;
           user_id?: string;
           business_name?: string | null;
-          business_address?: Json | null;
+          business_address?: Address | null; // Type-safe business address
           business_phone?: string | null;
           business_email?: string | null;
-          operating_hours?: Json;
+          operating_hours?: BusinessHours; // Type-safe business hours
           service_area?: Json | null;
           default_buffer_time?: number;
           auto_confirm_bookings?: boolean;

@@ -87,6 +87,17 @@ export default async function handler(
     const [response] = await sgMail.send(msg);
     const messageId = response.headers['x-message-id'] || response.statusCode.toString();
 
+    // Format message content for logging: prefer plain text, fallback to truncated HTML
+    let messageContent = subject;
+    if (text) {
+      // Use plain text content if available (truncate to 500 chars)
+      messageContent = text.length > 500 ? text.substring(0, 497) + '...' : text;
+    } else if (html) {
+      // Strip HTML tags and truncate
+      const stripped = html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+      messageContent = stripped.length > 500 ? stripped.substring(0, 497) + '...' : stripped;
+    }
+
     // Log notification in database
     const { error: logError } = await supabase
       .from('notifications')
@@ -95,7 +106,7 @@ export default async function handler(
         customer_id: customerId || null,
         type: 'email',
         status: response.statusCode === 202 ? 'sent' : 'failed',
-        message: subject,
+        message: messageContent,
         sent_at: new Date().toISOString(),
       });
 

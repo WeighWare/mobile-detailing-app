@@ -100,8 +100,28 @@ export default async function handler(
       .eq('id', appointmentId);
 
     if (updateError) {
-      console.error('Error updating appointment:', updateError);
-      // Don't fail the request - payment intent was created successfully
+      console.error('Error updating appointment with payment intent:', updateError);
+
+      // CRITICAL: Cancel the payment intent to prevent orphaned charges
+      // This ensures we don't have a payment intent in Stripe without a corresponding appointment record
+      try {
+        await stripe.paymentIntents.cancel(paymentIntent.id);
+        console.log(`Cancelled payment intent ${paymentIntent.id} due to database update failure`);
+
+        return res.status(500).json({
+          error: 'Failed to link payment to appointment. Payment has been cancelled.',
+          details: updateError.message,
+        });
+      } catch (cancelError) {
+        console.error('CRITICAL: Failed to cancel orphaned payment intent:', cancelError);
+        // Log this for manual review - we have an orphaned payment intent
+        console.error(`MANUAL REVIEW REQUIRED: Payment Intent ${paymentIntent.id} for appointment ${appointmentId}`);
+
+        return res.status(500).json({
+          error: 'Payment created but failed to link to appointment. Please contact support.',
+          paymentIntentId: paymentIntent.id,
+        });
+      }
     }
 
     // Return client secret for frontend

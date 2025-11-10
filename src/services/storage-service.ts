@@ -295,10 +295,17 @@ export class StorageService {
 
   /**
    * Save a notification log
+   * @param log - The notification log to save
+   * @param customerId - The customer ID (required for RLS)
+   * @param message - The notification message content (required by DB)
    */
-  async saveNotificationLog(log: NotificationLog): Promise<NotificationLog> {
+  async saveNotificationLog(
+    log: NotificationLog,
+    customerId: string,
+    message: string
+  ): Promise<NotificationLog> {
     try {
-      const dbNotification = this.transformAppNotificationToDb(log);
+      const dbNotification = this.transformAppNotificationToDb(log, customerId, message);
 
       const { data, error } = await supabase
         .from('notifications')
@@ -317,20 +324,14 @@ export class StorageService {
 
   /**
    * Save multiple notification logs (kept for compatibility)
+   * NOTE: This method is deprecated. Use saveNotificationLog with customerId and message instead.
+   * This method cannot properly set customer_id and message fields, which are required.
    */
   async saveNotificationLogs(logs: NotificationLog[]): Promise<void> {
-    try {
-      const dbNotifications = logs.map(this.transformAppNotificationToDb);
-
-      const { error } = await supabase
-        .from('notifications')
-        .insert(dbNotifications);
-
-      if (error) throw error;
-    } catch (error) {
-      console.error('Error saving notification logs:', error);
-      throw new Error('Failed to save notification logs');
-    }
+    console.warn('saveNotificationLogs is deprecated. Notifications should be created via API endpoints.');
+    // This method is kept for backward compatibility but should not be used
+    // The API endpoints (send-email.ts, send-sms.ts) handle notification logging properly
+    throw new Error('saveNotificationLogs is deprecated. Use send-email or send-sms API endpoints.');
   }
 
   // ============================================
@@ -506,7 +507,7 @@ export class StorageService {
       time: new Date(db.appointment_date).toTimeString().slice(0, 5),
       status: db.status as any,
       notes: db.notes || undefined,
-      location: db.location ? JSON.parse(db.location as string) : undefined,
+      location: db.location || undefined, // JSONB is already parsed by Supabase
       vehicleInfo: db.vehicle_info as any,
       payment: {
         status: db.payment_status || 'pending',
@@ -530,7 +531,7 @@ export class StorageService {
       service_id: app.services?.[0]?.id || null,
       appointment_date: `${app.date}T${app.time}:00`,
       status: app.status as any,
-      location: app.location ? JSON.stringify(app.location) : null,
+      location: app.location || null, // Supabase handles JSONB conversion
       vehicle_info: app.vehicleInfo as any,
       notes: app.notes || null,
       total_price: app.payment?.amount || null,
@@ -593,15 +594,22 @@ export class StorageService {
 
   /**
    * Transform app notification to database format
+   * @param app - The notification log from the app
+   * @param customerId - The customer ID (required for RLS)
+   * @param message - The notification message content (required by DB)
    */
-  private transformAppNotificationToDb(app: NotificationLog): Database['public']['Tables']['notifications']['Insert'] {
+  private transformAppNotificationToDb(
+    app: NotificationLog,
+    customerId: string,
+    message: string
+  ): Database['public']['Tables']['notifications']['Insert'] {
     return {
       id: app.id,
       appointment_id: app.appointmentId || null,
-      customer_id: null,
+      customer_id: customerId, // From parameter (required for RLS)
       type: app.method === 'sms' ? 'sms' : 'email',
       status: app.status === 'sent' ? 'sent' : app.status === 'failed' ? 'failed' : 'pending',
-      message: '',
+      message: message, // From parameter (required by DB NOT NULL constraint)
       sent_at: app.sentAt || null,
       error_message: app.errorMessage || null,
     };

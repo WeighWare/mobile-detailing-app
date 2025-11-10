@@ -19,6 +19,7 @@ import { supabase } from '../lib/supabase';
 import type {
   Appointment,
   CustomerProfile,
+  CustomerBasicProfile,
   BusinessSettings,
   NotificationLog
 } from '../types';
@@ -217,9 +218,10 @@ export class StorageService {
   // ============================================
 
   /**
-   * Get all customers
+   * Get all customers with basic profile data only (no computed stats).
+   * For customers with full statistics, use getCustomerWithStats().
    */
-  async getCustomers(): Promise<CustomerProfile[]> {
+  async getCustomers(): Promise<CustomerBasicProfile[]> {
     try {
       const { data, error } = await supabase
         .from('customers')
@@ -236,9 +238,10 @@ export class StorageService {
   }
 
   /**
-   * Get a customer by email
+   * Get a customer by email with basic profile data only (no computed stats).
+   * For customer with full statistics, use getCustomerWithStats().
    */
-  async getCustomerByEmail(email: string): Promise<CustomerProfile | null> {
+  async getCustomerByEmail(email: string): Promise<CustomerBasicProfile | null> {
     try {
       const { data, error } = await supabase
         .from('customers')
@@ -259,9 +262,10 @@ export class StorageService {
   }
 
   /**
-   * Save a single customer
+   * Save a single customer. Accepts CustomerProfile but only saves direct database fields.
+   * Returns CustomerBasicProfile (computed stats are not saved/returned).
    */
-  async saveCustomer(customer: CustomerProfile): Promise<CustomerProfile> {
+  async saveCustomer(customer: CustomerProfile): Promise<CustomerBasicProfile> {
     try {
       const dbCustomer = this.transformAppCustomerToDb(customer);
 
@@ -281,9 +285,10 @@ export class StorageService {
   }
 
   /**
-   * Save multiple customers (bulk operation)
+   * Save multiple customers (bulk operation). Accepts CustomerProfile array but only saves direct database fields.
+   * Returns CustomerBasicProfile array (computed stats are not saved/returned).
    */
-  async saveCustomers(customers: CustomerProfile[]): Promise<CustomerProfile[]> {
+  async saveCustomers(customers: CustomerProfile[]): Promise<CustomerBasicProfile[]> {
     try {
       const dbCustomers = customers.map(this.transformAppCustomerToDb);
 
@@ -314,110 +319,42 @@ export class StorageService {
    */
   async getCustomerWithStats(email: string): Promise<CustomerProfile | null> {
     try {
-      // First get the basic customer data
-      const { data: customerData, error: customerError } = await supabase
-        .from('customers')
-        .select('*')
-        .eq('email', email)
-        .single();
+      // Call database RPC function that computes all stats in one query
+      // This is significantly more efficient than multiple round-trips
+      const { data, error } = await supabase
+        .rpc('get_customer_profile_with_stats', { p_email: email });
 
-      if (customerError) {
-        if (customerError.code === 'PGRST116') return null;
-        throw customerError;
-      }
+      if (error) throw error;
+      if (!data) return null;
 
-      // Get appointment statistics
-      const { data: appointmentsData, error: appointmentsError } = await supabase
-        .from('appointments')
-        .select('id, appointment_date, total_price, vehicle_info, location, status')
-        .eq('customer_id', customerData.id);
-
-      if (appointmentsError) throw appointmentsError;
-
-      // Calculate stats
-      const completedAppointments = (appointmentsData || []).filter(apt => apt.status === 'completed');
-      const totalBookings = completedAppointments.length;
-      const totalSpent = completedAppointments.reduce((sum, apt) => sum + (apt.total_price || 0), 0);
-      const lastBookingDate = appointmentsData && appointmentsData.length > 0
-        ? new Date(Math.max(...appointmentsData.map(apt => new Date(apt.appointment_date).getTime()))).toISOString()
-        : undefined;
-
-      // Extract unique vehicles
-      const vehicleHistory: any[] = [];
-      const seenVehicles = new Set<string>();
-      (appointmentsData || []).forEach(apt => {
-        if (apt.vehicle_info) {
-          const vehicleKey = JSON.stringify(apt.vehicle_info);
-          if (!seenVehicles.has(vehicleKey)) {
-            seenVehicles.add(vehicleKey);
-            vehicleHistory.push(apt.vehicle_info);
-          }
-        }
-      });
-
-      // Extract unique addresses
-      const addresses: any[] = [];
-      const seenAddresses = new Set<string>();
-      (appointmentsData || []).forEach(apt => {
-        if (apt.location) {
-          const addressKey = JSON.stringify(apt.location);
-          if (!seenAddresses.has(addressKey)) {
-            seenAddresses.add(addressKey);
-            addresses.push(apt.location);
-          }
-        }
-      });
-
-      // Get preferred services from appointment_services frequency
-      const { data: servicesData, error: servicesError } = await supabase
-        .from('appointment_services')
-        .select('service_id, services(name)')
-        .in('appointment_id', (appointmentsData || []).map(apt => apt.id));
-
-      if (servicesError) throw servicesError;
-
-      // Calculate service frequency
-      const serviceFrequency: Record<string, number> = {};
-      (servicesData || []).forEach(item => {
-        const serviceName = item.services?.name;
-        if (serviceName) {
-          serviceFrequency[serviceName] = (serviceFrequency[serviceName] || 0) + 1;
-        }
-      });
-
-      const preferredServices = Object.entries(serviceFrequency)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 3)
-        .map(([name]) => name);
-
-      // Build complete customer profile
+      // Transform database JSONB result to CustomerProfile type
       return {
-        id: customerData.id,
-        email: customerData.email,
-        name: customerData.name,
-        phone: customerData.phone || '',
+        id: data.id,
+        email: data.email,
+        name: data.name,
+        phone: data.phone || '',
         preferredContactMethod: 'both',
-        loyaltyPoints: customerData.loyalty_points,
-        totalBookings,
-        totalSpent,
+        loyaltyPoints: data.loyaltyPoints,
+        totalBookings: data.totalBookings,
+        totalSpent: data.totalSpent,
         averageRating: 0, // TODO: Implement ratings system
-        lastBookingDate,
-        createdAt: customerData.created_at,
-        vehicleHistory,
+        lastBookingDate: data.lastBookingDate,
+        createdAt: data.createdAt,
+        vehicleHistory: data.vehicleHistory || [],
         preferences: {
-          preferredServices,
+          preferredServices: data.preferredServices || [],
           preferredTimes: [], // TODO: Analyze appointment times
           preferredDays: [], // TODO: Analyze appointment days
-          notifications: (customerData.notification_preferences as any) || {
+          notifications: data.notificationPreferences || {
             reminders: true,
             promotions: true,
             statusUpdates: true,
             newsletter: false,
           },
         },
-        addresses,
+        addresses: data.addresses || [],
         isActive: true,
-        tier: totalSpent > 1000 ? 'gold' : totalSpent > 500 ? 'silver' : 'bronze',
+        tier: data.tier,
       } as CustomerProfile;
     } catch (error) {
       console.error('Error fetching customer with stats:', error);
@@ -827,26 +764,11 @@ export class StorageService {
   }
 
   /**
-   * Transform database customer to app format
-   *
-   * NOTE: This returns a simplified CustomerProfile with computed fields set to defaults.
-   * The following fields are NOT computed from the database for performance reasons:
-   * - totalBookings: Set to 0 (should be COUNT of appointments for this customer)
-   * - totalSpent: Not included (should be SUM of appointment total_price)
-   * - averageRating: Set to 0 (requires ratings table that doesn't exist yet)
-   * - lastBookingDate: Not included (should be MAX appointment_date)
-   * - vehicleHistory: Empty array (should aggregate vehicle_info from appointments)
-   * - addresses: Not included (should aggregate location from appointments)
-   * - preferences: Set from notification_preferences only
-   * - isActive: Not included (no field in DB)
-   * - tier: Not included (no field in DB)
-   *
-   * For a complete customer profile with computed stats, use getCustomerWithStats() instead.
-   *
-   * TODO: Consider creating a separate CustomerBasicProfile type for data directly from DB
-   * TODO: Implement getCustomerWithStats() to compute totalBookings, totalSpent, etc.
+   * Transform database customer to basic profile (no computed stats).
+   * Only includes fields directly from the customers table.
+   * For complete profile with stats, use getCustomerWithStats() instead.
    */
-  private transformDbCustomerToApp(db: DbCustomer): CustomerProfile {
+  private transformDbCustomerToApp(db: DbCustomer): CustomerBasicProfile {
     return {
       id: db.id,
       email: db.email,
@@ -854,15 +776,8 @@ export class StorageService {
       phone: db.phone || '',
       preferredContactMethod: 'both',
       loyaltyPoints: db.loyalty_points,
-      totalBookings: 0, // TODO: Compute from appointments count
-      totalSpent: 0, // TODO: Compute from SUM(appointments.total_price)
-      averageRating: 0, // TODO: Implement ratings system
       createdAt: db.created_at,
-      vehicleHistory: [], // TODO: Extract from appointments.vehicle_info
       preferences: {
-        preferredServices: [], // TODO: Compute from appointment_services frequency
-        preferredTimes: [], // TODO: Analyze appointment times
-        preferredDays: [], // TODO: Analyze appointment days
         notifications: (db.notification_preferences as any) || {
           reminders: true,
           promotions: true,
@@ -870,10 +785,8 @@ export class StorageService {
           newsletter: false,
         },
       },
-      addresses: [], // TODO: Extract from appointments.location
       isActive: true, // Default to true (no field in DB yet)
-      tier: undefined, // TODO: Implement tier calculation based on totalSpent
-    } as CustomerProfile;
+    } as CustomerBasicProfile;
   }
 
   /**

@@ -52,7 +52,7 @@ CREATE TABLE IF NOT EXISTS customers (
   email TEXT UNIQUE NOT NULL,
   name TEXT NOT NULL,
   phone TEXT,
-  address TEXT,
+  address JSONB, -- Structured address data (street, city, state, zip, etc.)
   loyalty_points INTEGER DEFAULT 0,
   notification_preferences JSONB DEFAULT '{"sms": true, "email": true, "reminders": true}'::jsonb,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -140,7 +140,7 @@ CREATE TABLE IF NOT EXISTS notifications (
 -- ============================================
 CREATE TABLE IF NOT EXISTS business_settings (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  user_id UUID NOT NULL, -- References auth.users(id) - Supabase Auth
+  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL, -- References auth.users(id) - Supabase Auth
   business_name TEXT,
   business_address JSONB,
   business_phone TEXT,
@@ -235,7 +235,22 @@ CREATE OR REPLACE FUNCTION update_appointment_services(
   p_services JSONB  -- Array of {service_id: uuid, price_at_booking: decimal}
 )
 RETURNS VOID AS $$
+DECLARE
+  is_owner BOOLEAN;
 BEGIN
+  -- Security Check: Ensure user is owner of the appointment or has 'owner' role
+  -- This is critical because function uses SECURITY DEFINER and bypasses RLS
+  SELECT (
+    EXISTS (
+      SELECT 1 FROM appointments
+      WHERE id = p_appointment_id AND customer_id = auth.uid()
+    ) OR (auth.jwt() ->> 'role' = 'owner')
+  ) INTO is_owner;
+
+  IF NOT is_owner THEN
+    RAISE EXCEPTION 'Permission denied to update services for this appointment';
+  END IF;
+
   -- Delete existing services for this appointment
   DELETE FROM appointment_services
   WHERE appointment_id = p_appointment_id;
@@ -252,6 +267,90 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- Grant execute permission to authenticated users
 GRANT EXECUTE ON FUNCTION update_appointment_services(UUID, JSONB) TO authenticated;
+
+-- Function to get customer profile with computed statistics
+-- This optimizes the getCustomerWithStats by doing all aggregation in the database
+CREATE OR REPLACE FUNCTION get_customer_profile_with_stats(p_email TEXT)
+RETURNS JSONB AS $$
+DECLARE
+  v_customer_id UUID;
+  v_result JSONB;
+BEGIN
+  -- Get customer ID from email
+  SELECT id INTO v_customer_id
+  FROM customers
+  WHERE email = p_email;
+
+  IF v_customer_id IS NULL THEN
+    RETURN NULL;
+  END IF;
+
+  -- Build complete profile with all stats in one query
+  SELECT jsonb_build_object(
+    'id', c.id,
+    'email', c.email,
+    'name', c.name,
+    'phone', c.phone,
+    'loyaltyPoints', c.loyalty_points,
+    'totalBookings', COALESCE(stats.total_bookings, 0),
+    'totalSpent', COALESCE(stats.total_spent, 0),
+    'lastBookingDate', stats.last_booking_date,
+    'createdAt', c.created_at,
+    'notificationPreferences', c.notification_preferences,
+    'vehicleHistory', COALESCE(vehicles.vehicle_list, '[]'::jsonb),
+    'addresses', COALESCE(locations.address_list, '[]'::jsonb),
+    'preferredServices', COALESCE(services.service_names, '[]'::jsonb),
+    'tier',
+      CASE
+        WHEN COALESCE(stats.total_spent, 0) > 1000 THEN 'gold'
+        WHEN COALESCE(stats.total_spent, 0) > 500 THEN 'silver'
+        ELSE 'bronze'
+      END
+  ) INTO v_result
+  FROM customers c
+  -- Stats from completed appointments
+  LEFT JOIN LATERAL (
+    SELECT
+      COUNT(*)::int AS total_bookings,
+      SUM(total_price) AS total_spent,
+      MAX(appointment_date) AS last_booking_date
+    FROM appointments
+    WHERE customer_id = v_customer_id AND status = 'completed'
+  ) stats ON true
+  -- Unique vehicles from appointments
+  LEFT JOIN LATERAL (
+    SELECT jsonb_agg(DISTINCT vehicle_info) AS vehicle_list
+    FROM appointments
+    WHERE customer_id = v_customer_id AND vehicle_info IS NOT NULL
+  ) vehicles ON true
+  -- Unique addresses from appointments
+  LEFT JOIN LATERAL (
+    SELECT jsonb_agg(DISTINCT location) AS address_list
+    FROM appointments
+    WHERE customer_id = v_customer_id AND location IS NOT NULL
+  ) locations ON true
+  -- Top 3 most frequently used services
+  LEFT JOIN LATERAL (
+    SELECT jsonb_agg(service_name) AS service_names
+    FROM (
+      SELECT s.name AS service_name
+      FROM appointment_services aps
+      JOIN appointments a ON a.id = aps.appointment_id
+      JOIN services s ON s.id = aps.service_id
+      WHERE a.customer_id = v_customer_id
+      GROUP BY s.id, s.name
+      ORDER BY COUNT(*) DESC
+      LIMIT 3
+    ) top_services
+  ) services ON true
+  WHERE c.id = v_customer_id;
+
+  RETURN v_result;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Grant execute permission to authenticated users
+GRANT EXECUTE ON FUNCTION get_customer_profile_with_stats(TEXT) TO authenticated;
 
 -- ============================================
 -- SUCCESS MESSAGE

@@ -27,7 +27,7 @@ export interface Database {
           email: string;
           name: string;
           phone: string | null;
-          address: string | null;
+          address: Json; // Structured address data (street, city, state, zip)
           loyalty_points: number;
           notification_preferences: Json;
           created_at: string;
@@ -38,7 +38,7 @@ export interface Database {
           email: string;
           name: string;
           phone?: string | null;
-          address?: string | null;
+          address?: Json; // Structured address data (street, city, state, zip)
           loyalty_points?: number;
           notification_preferences?: Json;
           created_at?: string;
@@ -49,7 +49,7 @@ export interface Database {
           email?: string;
           name?: string;
           phone?: string | null;
-          address?: string | null;
+          address?: Json; // Structured address data (street, city, state, zip)
           loyalty_points?: number;
           notification_preferences?: Json;
           created_at?: string;

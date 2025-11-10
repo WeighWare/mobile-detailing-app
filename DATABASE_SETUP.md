@@ -135,6 +135,46 @@ CREATE TABLE IF NOT EXISTS notifications (
 );
 
 -- ============================================
+-- BUSINESS SETTINGS TABLE
+-- Multi-tenant business settings tied to user accounts
+-- ============================================
+CREATE TABLE IF NOT EXISTS business_settings (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID NOT NULL, -- References auth.users(id) - Supabase Auth
+  business_name TEXT,
+  business_address JSONB,
+  business_phone TEXT,
+  business_email TEXT,
+  operating_hours JSONB DEFAULT '{
+    "monday": {"open": "09:00", "close": "17:00", "closed": false},
+    "tuesday": {"open": "09:00", "close": "17:00", "closed": false},
+    "wednesday": {"open": "09:00", "close": "17:00", "closed": false},
+    "thursday": {"open": "09:00", "close": "17:00", "closed": false},
+    "friday": {"open": "09:00", "close": "17:00", "closed": false},
+    "saturday": {"open": "10:00", "close": "14:00", "closed": false},
+    "sunday": {"open": "10:00", "close": "14:00", "closed": true}
+  }'::jsonb,
+  service_area JSONB, -- Geographic service area boundaries
+  default_buffer_time INTEGER DEFAULT 15, -- Minutes between appointments
+  auto_confirm_bookings BOOLEAN DEFAULT false,
+  require_deposit BOOLEAN DEFAULT false,
+  deposit_percentage DECIMAL(5,2) DEFAULT 0.00,
+  cancellation_policy TEXT,
+  terms_and_conditions TEXT,
+  tax_rate DECIMAL(5,2) DEFAULT 0.00,
+  currency TEXT DEFAULT 'USD',
+  timezone TEXT DEFAULT 'America/New_York',
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+
+  -- Constraints
+  CONSTRAINT unique_user_settings UNIQUE(user_id),
+  CONSTRAINT valid_buffer_time CHECK (default_buffer_time >= 0 AND default_buffer_time <= 120),
+  CONSTRAINT valid_deposit_percentage CHECK (deposit_percentage >= 0 AND deposit_percentage <= 100),
+  CONSTRAINT valid_tax_rate CHECK (tax_rate >= 0 AND tax_rate <= 100)
+);
+
+-- ============================================
 -- INDEXES FOR PERFORMANCE
 -- ============================================
 
@@ -148,6 +188,7 @@ CREATE INDEX IF NOT EXISTS idx_notifications_appointment ON notifications(appoin
 CREATE INDEX IF NOT EXISTS idx_notifications_customer ON notifications(customer_id);
 CREATE INDEX IF NOT EXISTS idx_customers_email ON customers(email);
 CREATE INDEX IF NOT EXISTS idx_services_active ON services(active);
+CREATE INDEX IF NOT EXISTS idx_business_settings_user ON business_settings(user_id);
 
 -- ============================================
 -- TRIGGERS & FUNCTIONS
@@ -173,6 +214,13 @@ CREATE TRIGGER update_customers_updated_at
 DROP TRIGGER IF EXISTS update_appointments_updated_at ON appointments;
 CREATE TRIGGER update_appointments_updated_at
   BEFORE UPDATE ON appointments
+  FOR EACH ROW
+  EXECUTE FUNCTION update_updated_at_column();
+
+-- Apply trigger to business_settings table
+DROP TRIGGER IF EXISTS update_business_settings_updated_at ON business_settings;
+CREATE TRIGGER update_business_settings_updated_at
+  BEFORE UPDATE ON business_settings
   FOR EACH ROW
   EXECUTE FUNCTION update_updated_at_column();
 
@@ -206,6 +254,7 @@ ALTER TABLE appointments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE appointment_services ENABLE ROW LEVEL SECURITY;
 ALTER TABLE services ENABLE ROW LEVEL SECURITY;
 ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
+ALTER TABLE business_settings ENABLE ROW LEVEL SECURITY;
 
 -- ============================================
 -- CUSTOMERS POLICIES
@@ -315,6 +364,30 @@ CREATE POLICY "Users can view own notifications" ON notifications
 
 -- System (service role) can create notifications
 -- This is handled via service role key in backend
+
+-- ============================================
+-- BUSINESS SETTINGS POLICIES
+-- ============================================
+
+-- Users can view their own business settings
+CREATE POLICY "Users can view own business settings" ON business_settings
+  FOR SELECT
+  USING (user_id = auth.uid());
+
+-- Users can insert their own business settings (once)
+CREATE POLICY "Users can create own business settings" ON business_settings
+  FOR INSERT
+  WITH CHECK (user_id = auth.uid());
+
+-- Users can update their own business settings
+CREATE POLICY "Users can update own business settings" ON business_settings
+  FOR UPDATE
+  USING (user_id = auth.uid());
+
+-- Users can delete their own business settings
+CREATE POLICY "Users can delete own business settings" ON business_settings
+  FOR DELETE
+  USING (user_id = auth.uid());
 
 -- ============================================
 -- SUCCESS MESSAGE

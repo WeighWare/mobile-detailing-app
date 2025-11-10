@@ -286,61 +286,157 @@ export class StorageService {
     }
   }
 
+  /**
+   * Get customer with computed statistics
+   * This method fetches a customer and computes aggregate fields from related tables:
+   * - totalBookings: COUNT of appointments
+   * - totalSpent: SUM of appointment total_price
+   * - lastBookingDate: MAX appointment_date
+   * - vehicleHistory: Unique vehicles from appointments
+   * - addresses: Unique addresses from appointments
+   *
+   * This is more expensive than getCustomerByEmail() but returns complete data.
+   */
+  async getCustomerWithStats(email: string): Promise<CustomerProfile | null> {
+    try {
+      // First get the basic customer data
+      const { data: customerData, error: customerError } = await supabase
+        .from('customers')
+        .select('*')
+        .eq('email', email)
+        .single();
+
+      if (customerError) {
+        if (customerError.code === 'PGRST116') return null;
+        throw customerError;
+      }
+
+      // Get appointment statistics
+      const { data: appointmentsData, error: appointmentsError } = await supabase
+        .from('appointments')
+        .select('id, appointment_date, total_price, vehicle_info, location, status')
+        .eq('customer_id', customerData.id);
+
+      if (appointmentsError) throw appointmentsError;
+
+      // Calculate stats
+      const completedAppointments = (appointmentsData || []).filter(apt => apt.status === 'completed');
+      const totalBookings = completedAppointments.length;
+      const totalSpent = completedAppointments.reduce((sum, apt) => sum + (apt.total_price || 0), 0);
+      const lastBookingDate = appointmentsData && appointmentsData.length > 0
+        ? new Date(Math.max(...appointmentsData.map(apt => new Date(apt.appointment_date).getTime()))).toISOString()
+        : undefined;
+
+      // Extract unique vehicles
+      const vehicleHistory: any[] = [];
+      const seenVehicles = new Set<string>();
+      (appointmentsData || []).forEach(apt => {
+        if (apt.vehicle_info) {
+          const vehicleKey = JSON.stringify(apt.vehicle_info);
+          if (!seenVehicles.has(vehicleKey)) {
+            seenVehicles.add(vehicleKey);
+            vehicleHistory.push(apt.vehicle_info);
+          }
+        }
+      });
+
+      // Extract unique addresses
+      const addresses: any[] = [];
+      const seenAddresses = new Set<string>();
+      (appointmentsData || []).forEach(apt => {
+        if (apt.location) {
+          const addressKey = JSON.stringify(apt.location);
+          if (!seenAddresses.has(addressKey)) {
+            seenAddresses.add(addressKey);
+            addresses.push(apt.location);
+          }
+        }
+      });
+
+      // Get preferred services from appointment_services frequency
+      const { data: servicesData, error: servicesError } = await supabase
+        .from('appointment_services')
+        .select('service_id, services(name)')
+        .in('appointment_id', (appointmentsData || []).map(apt => apt.id));
+
+      if (servicesError) throw servicesError;
+
+      // Calculate service frequency
+      const serviceFrequency: Record<string, number> = {};
+      (servicesData || []).forEach(item => {
+        const serviceName = item.services?.name;
+        if (serviceName) {
+          serviceFrequency[serviceName] = (serviceFrequency[serviceName] || 0) + 1;
+        }
+      });
+
+      const preferredServices = Object.entries(serviceFrequency)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3)
+        .map(([name]) => name);
+
+      // Build complete customer profile
+      return {
+        id: customerData.id,
+        email: customerData.email,
+        name: customerData.name,
+        phone: customerData.phone || '',
+        preferredContactMethod: 'both',
+        loyaltyPoints: customerData.loyalty_points,
+        totalBookings,
+        totalSpent,
+        averageRating: 0, // TODO: Implement ratings system
+        lastBookingDate,
+        createdAt: customerData.created_at,
+        vehicleHistory,
+        preferences: {
+          preferredServices,
+          preferredTimes: [], // TODO: Analyze appointment times
+          preferredDays: [], // TODO: Analyze appointment days
+          notifications: (customerData.notification_preferences as any) || {
+            reminders: true,
+            promotions: true,
+            statusUpdates: true,
+            newsletter: false,
+          },
+        },
+        addresses,
+        isActive: true,
+        tier: totalSpent > 1000 ? 'gold' : totalSpent > 500 ? 'silver' : 'bronze',
+      } as CustomerProfile;
+    } catch (error) {
+      console.error('Error fetching customer with stats:', error);
+      return null;
+    }
+  }
+
   // ============================================
   // BUSINESS SETTINGS
   // ============================================
 
   /**
-   * Get business settings
-   *
-   * ⚠️ CRITICAL LIMITATION - NOT SUITABLE FOR PRODUCTION SAAS
-   *
-   * This method uses localStorage, which is device-specific and not tied to user accounts.
-   * This is NOT suitable for a multi-user SaaS application because:
-   * 1. Settings are lost when user switches devices/browsers
-   * 2. Settings are not shared across user's devices
-   * 3. Multiple users on same device would share settings
-   * 4. No backup/recovery of settings
-   * 5. No audit trail of setting changes
-   *
-   * FOR PRODUCTION, business settings MUST be migrated to a database table:
-   *
-   * CREATE TABLE business_settings (
-   *   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-   *   user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
-   *   business_name TEXT,
-   *   business_address JSONB,
-   *   business_phone TEXT,
-   *   business_email TEXT,
-   *   operating_hours JSONB,
-   *   service_area JSONB,
-   *   default_buffer_time INTEGER,
-   *   auto_confirm_bookings BOOLEAN,
-   *   require_deposit BOOLEAN,
-   *   deposit_percentage DECIMAL(5,2),
-   *   cancellation_policy TEXT,
-   *   terms_and_conditions TEXT,
-   *   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-   *   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-   *   CONSTRAINT unique_user_settings UNIQUE(user_id)
-   * );
-   *
-   * Then implement getBusinessSettings() to fetch from DB with RLS policies.
-   *
-   * TODO: Create business_settings table in DATABASE_SETUP.md
-   * TODO: Add RLS policies for business_settings
-   * TODO: Implement async getBusinessSettings(userId: string)
-   * TODO: Implement async saveBusinessSettings(userId: string, settings: BusinessSettings)
-   * TODO: Migration script to move localStorage settings to database
+   * Get business settings from database
+   * @param userId - The user ID from auth context (required for RLS)
+   * @returns Business settings for the user
    */
-  getBusinessSettings(): Partial<BusinessSettings> {
-    console.warn(
-      'PRODUCTION WARNING: Business settings are stored in localStorage. ' +
-      'This is NOT suitable for SaaS applications. Settings must be moved to database.'
-    );
+  async getBusinessSettings(userId: string): Promise<Partial<BusinessSettings>> {
     try {
-      const saved = localStorage.getItem('mobile-detailers-settings');
-      return saved ? JSON.parse(saved) : {};
+      const { data, error } = await supabase
+        .from('business_settings')
+        .select('*')
+        .eq('user_id', userId)
+        .single();
+
+      if (error) {
+        // If no settings found (PGRST116), return empty object
+        if (error.code === 'PGRST116') {
+          return {};
+        }
+        throw error;
+      }
+
+      // Transform database format to app format
+      return this.transformDbBusinessSettingsToApp(data);
     } catch (error) {
       console.error('Error loading business settings:', error);
       return {};
@@ -348,21 +444,54 @@ export class StorageService {
   }
 
   /**
-   * Save business settings
-   *
-   * ⚠️ CRITICAL LIMITATION - NOT SUITABLE FOR PRODUCTION SAAS
-   * See getBusinessSettings() documentation for details and migration plan.
+   * Save business settings to database
+   * @param userId - The user ID from auth context (required for RLS)
+   * @param settings - Business settings to save
+   * @returns True if successful, false otherwise
    */
-  saveBusinessSettings(settings: Partial<BusinessSettings>): boolean {
-    console.warn(
-      'PRODUCTION WARNING: Business settings are stored in localStorage. ' +
-      'This is NOT suitable for SaaS applications. Settings must be moved to database.'
-    );
+  async saveBusinessSettings(userId: string, settings: Partial<BusinessSettings>): Promise<boolean> {
+    try {
+      const dbSettings = this.transformAppBusinessSettingsToDb(userId, settings);
+
+      const { error } = await supabase
+        .from('business_settings')
+        .upsert(dbSettings);
+
+      if (error) throw error;
+
+      return true;
+    } catch (error) {
+      console.error('Error saving business settings:', error);
+      return false;
+    }
+  }
+
+  /**
+   * DEPRECATED: Legacy localStorage getter
+   * @deprecated Use async getBusinessSettings(userId) instead
+   */
+  getBusinessSettingsLegacy(): Partial<BusinessSettings> {
+    console.warn('DEPRECATED: Use async getBusinessSettings(userId) instead');
+    try {
+      const saved = localStorage.getItem('mobile-detailers-settings');
+      return saved ? JSON.parse(saved) : {};
+    } catch (error) {
+      console.error('Error loading legacy settings:', error);
+      return {};
+    }
+  }
+
+  /**
+   * DEPRECATED: Legacy localStorage setter
+   * @deprecated Use async saveBusinessSettings(userId, settings) instead
+   */
+  saveBusinessSettingsLegacy(settings: Partial<BusinessSettings>): boolean {
+    console.warn('DEPRECATED: Use async saveBusinessSettings(userId, settings) instead');
     try {
       localStorage.setItem('mobile-detailers-settings', JSON.stringify(settings));
       return true;
     } catch (error) {
-      console.error('Error saving business settings:', error);
+      console.error('Error saving legacy settings:', error);
       return false;
     }
   }
@@ -782,6 +911,56 @@ export class StorageService {
       message: message, // From parameter (required by DB NOT NULL constraint)
       sent_at: app.sentAt || null,
       error_message: app.errorMessage || null,
+    };
+  }
+
+  /**
+   * Transform database business settings to app format
+   */
+  private transformDbBusinessSettingsToApp(db: any): Partial<BusinessSettings> {
+    return {
+      businessName: db.business_name || undefined,
+      businessAddress: db.business_address || undefined,
+      businessPhone: db.business_phone || undefined,
+      businessEmail: db.business_email || undefined,
+      operatingHours: db.operating_hours || undefined,
+      serviceArea: db.service_area || undefined,
+      defaultBufferTime: db.default_buffer_time,
+      autoConfirmBookings: db.auto_confirm_bookings,
+      requireDeposit: db.require_deposit,
+      depositPercentage: db.deposit_percentage,
+      cancellationPolicy: db.cancellation_policy || undefined,
+      termsAndConditions: db.terms_and_conditions || undefined,
+      taxRate: db.tax_rate,
+      currency: db.currency,
+      timezone: db.timezone,
+    };
+  }
+
+  /**
+   * Transform app business settings to database format
+   */
+  private transformAppBusinessSettingsToDb(
+    userId: string,
+    app: Partial<BusinessSettings>
+  ): Database['public']['Tables']['business_settings']['Insert'] {
+    return {
+      user_id: userId,
+      business_name: app.businessName || null,
+      business_address: app.businessAddress || null,
+      business_phone: app.businessPhone || null,
+      business_email: app.businessEmail || null,
+      operating_hours: app.operatingHours || undefined,
+      service_area: app.serviceArea || null,
+      default_buffer_time: app.defaultBufferTime || 15,
+      auto_confirm_bookings: app.autoConfirmBookings || false,
+      require_deposit: app.requireDeposit || false,
+      deposit_percentage: app.depositPercentage || 0,
+      cancellation_policy: app.cancellationPolicy || null,
+      terms_and_conditions: app.termsAndConditions || null,
+      tax_rate: app.taxRate || 0,
+      currency: app.currency || 'USD',
+      timezone: app.timezone || 'America/New_York',
     };
   }
 }

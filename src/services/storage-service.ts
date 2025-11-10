@@ -43,19 +43,27 @@ export class StorageService {
   // ============================================
 
   /**
-   * Get all appointments from Supabase
+   * Get all appointments from Supabase with joined customer and services data
    */
   async getAppointments(): Promise<Appointment[]> {
     try {
       const { data, error } = await supabase
         .from('appointments')
-        .select('*')
+        .select(`
+          *,
+          customers (id, name, email, phone),
+          appointment_services (
+            service_id,
+            price_at_booking,
+            services (id, name, description, price, duration)
+          )
+        `)
         .order('appointment_date', { ascending: false });
 
       if (error) throw error;
 
       // Transform database records to app format
-      return (data || []).map(this.transformDbAppointmentToApp);
+      return (data || []).map(this.transformDbAppointmentWithJoinsToApp);
     } catch (error) {
       console.error('Error fetching appointments:', error);
       throw new Error('Failed to fetch appointments from database');
@@ -63,13 +71,21 @@ export class StorageService {
   }
 
   /**
-   * Get a single appointment by ID
+   * Get a single appointment by ID with joined customer and services data
    */
   async getAppointmentById(id: string): Promise<Appointment | null> {
     try {
       const { data, error } = await supabase
         .from('appointments')
-        .select('*')
+        .select(`
+          *,
+          customers (id, name, email, phone),
+          appointment_services (
+            service_id,
+            price_at_booking,
+            services (id, name, description, price, duration)
+          )
+        `)
         .eq('id', id)
         .single();
 
@@ -78,7 +94,7 @@ export class StorageService {
         throw error;
       }
 
-      return this.transformDbAppointmentToApp(data);
+      return this.transformDbAppointmentWithJoinsToApp(data);
     } catch (error) {
       console.error('Error fetching appointment:', error);
       return null;
@@ -87,11 +103,15 @@ export class StorageService {
 
   /**
    * Save a single appointment (create or update)
+   * @param appointment - The appointment to save
+   * @param customerId - The customer ID from auth context (required for RLS)
    */
-  async saveAppointment(appointment: Appointment): Promise<Appointment> {
+  async saveAppointment(appointment: Appointment, customerId: string): Promise<Appointment> {
     try {
-      const dbAppointment = this.transformAppAppointmentToDb(appointment);
+      // Transform appointment for database
+      const dbAppointment = this.transformAppAppointmentToDb(appointment, customerId);
 
+      // Save the main appointment record
       const { data, error } = await supabase
         .from('appointments')
         .upsert(dbAppointment)
@@ -100,7 +120,33 @@ export class StorageService {
 
       if (error) throw error;
 
-      return this.transformDbAppointmentToApp(data);
+      // Save appointment services to join table
+      if (appointment.services && appointment.services.length > 0) {
+        // First, delete existing appointment_services records for this appointment
+        await supabase
+          .from('appointment_services')
+          .delete()
+          .eq('appointment_id', data.id);
+
+        // Then insert new records for each service
+        const appointmentServices = appointment.services.map(service => ({
+          appointment_id: data.id,
+          service_id: service.id,
+          price_at_booking: service.price,
+        }));
+
+        const { error: servicesError } = await supabase
+          .from('appointment_services')
+          .insert(appointmentServices);
+
+        if (servicesError) {
+          console.error('Error saving appointment services:', servicesError);
+          throw servicesError;
+        }
+      }
+
+      // Fetch the complete appointment with joins
+      return await this.getAppointmentById(data.id) || this.transformDbAppointmentToApp(data);
     } catch (error) {
       console.error('Error saving appointment:', error);
       throw new Error('Failed to save appointment to database');
@@ -109,20 +155,21 @@ export class StorageService {
 
   /**
    * Save multiple appointments (bulk operation)
-   * NOTE: This replaces the old saveAppointments() method
+   * NOTE: All appointments must belong to the same customer
+   * @param appointments - The appointments to save
+   * @param customerId - The customer ID from auth context (required for RLS)
    */
-  async saveAppointments(appointments: Appointment[]): Promise<Appointment[]> {
+  async saveAppointments(appointments: Appointment[], customerId: string): Promise<Appointment[]> {
     try {
-      const dbAppointments = appointments.map(this.transformAppAppointmentToDb);
+      // For bulk operations, save each appointment individually to handle services properly
+      const savedAppointments: Appointment[] = [];
 
-      const { data, error } = await supabase
-        .from('appointments')
-        .upsert(dbAppointments)
-        .select();
+      for (const appointment of appointments) {
+        const saved = await this.saveAppointment(appointment, customerId);
+        savedAppointments.push(saved);
+      }
 
-      if (error) throw error;
-
-      return (data || []).map(this.transformDbAppointmentToApp);
+      return savedAppointments;
     } catch (error) {
       console.error('Error saving appointments:', error);
       throw new Error('Failed to save appointments to database');
@@ -418,13 +465,15 @@ export class StorageService {
 
   /**
    * Import data to Supabase (for migration/restore)
+   * @param jsonData - JSON string containing exported data
+   * @param customerId - The customer ID to associate imported appointments with
    */
-  async importData(jsonData: string): Promise<boolean> {
+  async importData(jsonData: string, customerId: string): Promise<boolean> {
     try {
       const data = JSON.parse(jsonData);
 
       if (data.appointments?.length) {
-        await this.saveAppointments(data.appointments);
+        await this.saveAppointments(data.appointments, customerId);
       }
 
       if (data.customers?.length) {
@@ -449,8 +498,9 @@ export class StorageService {
   /**
    * ONE-TIME MIGRATION: Import data from localStorage to Supabase
    * This should be called once when transitioning from localStorage to Supabase
+   * @param customerId - The customer ID to associate imported appointments with
    */
-  async importFromLocalStorage(): Promise<{
+  async importFromLocalStorage(customerId: string): Promise<{
     success: boolean;
     imported: {
       appointments: number;
@@ -469,7 +519,7 @@ export class StorageService {
       const appointmentsData = localStorage.getItem('mobile-detailers-appointments');
       if (appointmentsData) {
         const appointments: Appointment[] = JSON.parse(appointmentsData);
-        await this.saveAppointments(appointments);
+        await this.saveAppointments(appointments, customerId);
         result.imported.appointments = appointments.length;
       }
 
@@ -496,7 +546,8 @@ export class StorageService {
   // ============================================
 
   /**
-   * Transform database appointment to app format
+   * Transform database appointment to app format (without joins - simplified)
+   * NOTE: This method returns incomplete data. Use transformDbAppointmentWithJoinsToApp for complete data.
    */
   private transformDbAppointmentToApp(db: DbAppointment): Appointment {
     // This is a simplified transformation - you may need to adjust based on your exact schema
@@ -522,13 +573,52 @@ export class StorageService {
   }
 
   /**
-   * Transform app appointment to database format
+   * Transform database appointment with joins to app format
+   * This handles the data structure returned from queries with customer and services joins
    */
-  private transformAppAppointmentToDb(app: Appointment): Database['public']['Tables']['appointments']['Insert'] {
+  private transformDbAppointmentWithJoinsToApp(db: any): Appointment {
+    return {
+      id: db.id,
+      customerName: db.customers?.name || '',
+      customerEmail: db.customers?.email,
+      customerPhone: db.customers?.phone || '',
+      date: new Date(db.appointment_date).toISOString().split('T')[0],
+      time: new Date(db.appointment_date).toTimeString().slice(0, 5),
+      status: db.status as any,
+      notes: db.notes || undefined,
+      location: db.location || undefined, // JSONB is already parsed by Supabase
+      vehicleInfo: db.vehicle_info as any,
+      payment: {
+        status: db.payment_status || 'pending',
+        amount: db.total_price || 0,
+        method: 'card',
+        stripePaymentIntentId: db.payment_intent_id || undefined,
+      },
+      services: (db.appointment_services || []).map((as: any) => ({
+        id: as.services?.id || as.service_id,
+        name: as.services?.name || '',
+        description: as.services?.description || '',
+        price: as.price_at_booking || as.services?.price || 0,
+        duration: as.services?.duration || 60,
+      })),
+      createdAt: db.created_at,
+      updatedAt: db.updated_at,
+    } as Appointment;
+  }
+
+  /**
+   * Transform app appointment to database format
+   * @param app - The appointment from the app
+   * @param customerId - The customer ID from auth context (required for RLS)
+   */
+  private transformAppAppointmentToDb(
+    app: Appointment,
+    customerId: string
+  ): Database['public']['Tables']['appointments']['Insert'] {
     return {
       id: app.id,
-      customer_id: null, // Set from auth context
-      service_id: app.services?.[0]?.id || null,
+      customer_id: customerId, // From parameter (required for RLS policies)
+      service_id: app.services?.[0]?.id || null, // Deprecated: services now in appointment_services table
       appointment_date: `${app.date}T${app.time}:00`,
       status: app.status as any,
       location: app.location || null, // Supabase handles JSONB conversion

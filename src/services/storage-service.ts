@@ -28,6 +28,27 @@ type DbAppointment = Database['public']['Tables']['appointments']['Row'];
 type DbCustomer = Database['public']['Tables']['customers']['Row'];
 type DbNotification = Database['public']['Tables']['notifications']['Row'];
 
+// Type for appointment with joined customer and services data
+type DbAppointmentWithJoins = DbAppointment & {
+  customers?: {
+    id: string;
+    name: string;
+    email: string;
+    phone: string | null;
+  } | null;
+  appointment_services?: Array<{
+    service_id: string;
+    price_at_booking: number;
+    services?: {
+      id: string;
+      name: string;
+      description: string | null;
+      price: number;
+      duration_minutes: number;
+    } | null;
+  }> | null;
+};
+
 export class StorageService {
   private static instance: StorageService;
 
@@ -120,28 +141,22 @@ export class StorageService {
 
       if (error) throw error;
 
-      // Save appointment services to join table
+      // Save appointment services to join table using atomic RPC function
+      // This prevents race conditions by executing delete+insert within a single transaction
       if (appointment.services && appointment.services.length > 0) {
-        // First, delete existing appointment_services records for this appointment
-        await supabase
-          .from('appointment_services')
-          .delete()
-          .eq('appointment_id', data.id);
-
-        // Then insert new records for each service
-        const appointmentServices = appointment.services.map(service => ({
-          appointment_id: data.id,
+        const servicesData = appointment.services.map(service => ({
           service_id: service.id,
           price_at_booking: service.price,
         }));
 
-        const { error: servicesError } = await supabase
-          .from('appointment_services')
-          .insert(appointmentServices);
+        const { error: rpcError } = await supabase.rpc('update_appointment_services', {
+          p_appointment_id: data.id,
+          p_services: servicesData,
+        });
 
-        if (servicesError) {
-          console.error('Error saving appointment services:', servicesError);
-          throw servicesError;
+        if (rpcError) {
+          console.error('Error saving appointment services:', rpcError);
+          throw rpcError;
         }
       }
 
@@ -554,8 +569,9 @@ export class StorageService {
    * Save multiple notification logs (kept for compatibility)
    * NOTE: This method is deprecated. Use saveNotificationLog with customerId and message instead.
    * This method cannot properly set customer_id and message fields, which are required.
+   * @deprecated This method always throws an error
    */
-  async saveNotificationLogs(logs: NotificationLog[]): Promise<void> {
+  async saveNotificationLogs(logs: NotificationLog[]): Promise<never> {
     console.warn('saveNotificationLogs is deprecated. Notifications should be created via API endpoints.');
     // This method is kept for backward compatibility but should not be used
     // The API endpoints (send-email.ts, send-sms.ts) handle notification logging properly
@@ -757,7 +773,7 @@ export class StorageService {
    * Transform database appointment with joins to app format
    * This handles the data structure returned from queries with customer and services joins
    */
-  private transformDbAppointmentWithJoinsToApp(db: any): Appointment {
+  private transformDbAppointmentWithJoinsToApp(db: DbAppointmentWithJoins): Appointment {
     return {
       id: db.id,
       customerName: db.customers?.name || '',
@@ -871,7 +887,7 @@ export class StorageService {
       phone: app.phone || null,
       address: null,
       loyalty_points: app.loyaltyPoints,
-      notification_preferences: app.notifications as any,
+      notification_preferences: app.preferences.notifications as any,
     };
   }
 

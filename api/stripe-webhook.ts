@@ -37,7 +37,7 @@ if (!stripeSecretKey || !supabaseUrl || !supabaseServiceRoleKey || !stripeWebhoo
 
 // Initialize Stripe
 const stripe = new Stripe(stripeSecretKey, {
-  apiVersion: '2024-11-20.acacia',
+  apiVersion: '2024-04-10', // Latest stable API version
 });
 
 // Initialize Supabase admin client
@@ -115,12 +115,12 @@ async function handlePaymentSuccess(paymentIntent: Stripe.PaymentIntent) {
   }
 
   // Update appointment payment status
+  // Note: updated_at is automatically updated by database trigger
   const { error } = await supabase
     .from('appointments')
     .update({
       payment_status: 'paid',
       payment_intent_id: paymentIntent.id,
-      updated_at: new Date().toISOString(),
     })
     .eq('id', appointmentId);
 
@@ -148,12 +148,12 @@ async function handlePaymentFailed(paymentIntent: Stripe.PaymentIntent) {
   }
 
   // Update appointment payment status
+  // Note: updated_at is automatically updated by database trigger
   const { error } = await supabase
     .from('appointments')
     .update({
       payment_status: 'failed',
       payment_intent_id: paymentIntent.id,
-      updated_at: new Date().toISOString(),
     })
     .eq('id', appointmentId);
 
@@ -180,11 +180,11 @@ async function handleRefund(charge: Stripe.Charge) {
   }
 
   // Update appointment payment status
-  const { error } = await supabase
+  // Note: updated_at is automatically updated by database trigger
+  const { error} = await supabase
     .from('appointments')
     .update({
       payment_status: 'refunded',
-      updated_at: new Date().toISOString(),
     })
     .eq('payment_intent_id', paymentIntentId);
 

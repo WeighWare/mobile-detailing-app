@@ -225,6 +225,35 @@ CREATE TRIGGER update_business_settings_updated_at
   EXECUTE FUNCTION update_updated_at_column();
 
 -- ============================================
+-- STORED PROCEDURES / RPC FUNCTIONS
+-- ============================================
+
+-- Function to atomically update appointment services
+-- This prevents race conditions when updating the services for an appointment
+CREATE OR REPLACE FUNCTION update_appointment_services(
+  p_appointment_id UUID,
+  p_services JSONB  -- Array of {service_id: uuid, price_at_booking: decimal}
+)
+RETURNS VOID AS $$
+BEGIN
+  -- Delete existing services for this appointment
+  DELETE FROM appointment_services
+  WHERE appointment_id = p_appointment_id;
+
+  -- Insert new services
+  INSERT INTO appointment_services (appointment_id, service_id, price_at_booking)
+  SELECT
+    p_appointment_id,
+    (service->>'service_id')::UUID,
+    (service->>'price_at_booking')::DECIMAL
+  FROM jsonb_array_elements(p_services) AS service;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Grant execute permission to authenticated users
+GRANT EXECUTE ON FUNCTION update_appointment_services(UUID, JSONB) TO authenticated;
+
+-- ============================================
 -- SUCCESS MESSAGE
 -- ============================================
 DO $$

@@ -40,7 +40,7 @@ if (!stripeSecretKey || !supabaseUrl || !supabaseServiceRoleKey) {
 
 // Initialize Stripe with secret key (backend only!)
 const stripe = new Stripe(stripeSecretKey, {
-  apiVersion: '2024-11-20.acacia',
+  apiVersion: '2024-04-10', // Latest stable API version
 });
 
 // Initialize Supabase admin client (for updating database)

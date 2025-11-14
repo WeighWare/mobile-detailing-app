@@ -640,14 +640,13 @@ function AppContent() {
             notificationService={notificationService}
           />
         ) : (
-          <CustomerPortal 
+          <CustomerPortal
             key="customer-portal"
             appointments={appointments}
             customerEmail={customerEmail}
             onAppointmentsUpdate={handleAppointmentUpdate}
             services={activeServices}
             businessSettings={businessSettings}
-            onProcessPayment={handlePaymentProcess}
           />
         )}
       </main>

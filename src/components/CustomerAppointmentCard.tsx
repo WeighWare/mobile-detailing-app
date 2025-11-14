@@ -4,16 +4,17 @@ import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './ui/dialog';
 import { Textarea } from './ui/textarea';
-import { 
-  Calendar, Clock, MapPin, CreditCard, Star, Truck, 
+import {
+  Calendar, Clock, MapPin, CreditCard, Star, Truck,
   XCircle, MessageSquare, Receipt, CheckCircle
 } from 'lucide-react';
 import { Appointment } from '../App';
+import { PaymentCheckout } from './PaymentCheckout';
 
 interface CustomerAppointmentCardProps {
   appointment: Appointment;
   onCancel: () => void;
-  onPayment: () => Promise<any>;
+  onPaymentSuccess: (paymentIntentId: string) => void;
   onRate: (rating: number, review?: string) => void;
   isHistoryView?: boolean;
 }
@@ -21,15 +22,15 @@ interface CustomerAppointmentCardProps {
 export function CustomerAppointmentCard({
   appointment,
   onCancel,
-  onPayment,
+  onPaymentSuccess,
   onRate,
   isHistoryView = false
 }: CustomerAppointmentCardProps) {
   const [showCancelDialog, setShowCancelDialog] = useState(false);
   const [showRatingDialog, setShowRatingDialog] = useState(false);
+  const [showPaymentDialog, setShowPaymentDialog] = useState(false);
   const [rating, setRating] = useState(0);
   const [review, setReview] = useState('');
-  const [isProcessingPayment, setIsProcessingPayment] = useState(false);
 
   const appointmentDate = new Date(appointment.date);
   const isUpcoming = appointmentDate >= new Date() && appointment.status !== 'cancelled';
@@ -47,13 +48,13 @@ export function CustomerAppointmentCard({
     }
   };
 
-  const handlePayment = async () => {
-    setIsProcessingPayment(true);
-    try {
-      await onPayment();
-    } finally {
-      setIsProcessingPayment(false);
-    }
+  const handlePaymentClick = () => {
+    setShowPaymentDialog(true);
+  };
+
+  const handlePaymentComplete = (paymentIntentId: string) => {
+    onPaymentSuccess(paymentIntentId);
+    setShowPaymentDialog(false);
   };
 
   const handleRateSubmit = () => {
@@ -88,13 +89,12 @@ export function CustomerAppointmentCard({
             
             <div className="flex gap-2">
               {appointment.payment?.status === 'pending' && (
-                <Button 
-                  size="sm" 
-                  onClick={handlePayment}
-                  disabled={isProcessingPayment}
+                <Button
+                  size="sm"
+                  onClick={handlePaymentClick}
                 >
                   <CreditCard className="w-4 h-4 mr-1" />
-                  {isProcessingPayment ? 'Processing...' : 'Pay Now'}
+                  Pay Now
                 </Button>
               )}
               
@@ -234,10 +234,10 @@ export function CustomerAppointmentCard({
                   onClick={() => setRating(i + 1)}
                   className="p-1"
                 >
-                  <Star 
+                  <Star
                     className={`w-8 h-8 ${
                       i < rating ? 'fill-yellow-400 text-yellow-400' : 'text-gray-300'
-                    }`} 
+                    }`}
                   />
                 </button>
               ))}
@@ -259,6 +259,14 @@ export function CustomerAppointmentCard({
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Payment Checkout Dialog */}
+      <PaymentCheckout
+        appointment={appointment}
+        isOpen={showPaymentDialog}
+        onClose={() => setShowPaymentDialog(false)}
+        onSuccess={handlePaymentComplete}
+      />
     </>
   );
 }

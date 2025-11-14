@@ -251,9 +251,9 @@ The system handles these error scenarios:
 
 The integration uses **Stripe API version `2024-04-10`** (latest stable).
 
-If Stripe releases a new API version, update in:
-- `api/create-payment-intent.ts` (line 39)
-- `api/stripe-webhook.ts` (line 40)
+If Stripe releases a new API version, update the `apiVersion` parameter in:
+- `api/create-payment-intent.ts` - Search for `apiVersion: '2024-04-10'`
+- `api/stripe-webhook.ts` - Search for `apiVersion: '2024-04-10'`
 
 ## Production Checklist
 

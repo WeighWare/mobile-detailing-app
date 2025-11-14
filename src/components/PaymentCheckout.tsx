@@ -60,7 +60,9 @@ function PaymentForm({
       const { error: confirmError, paymentIntent } = await stripe.confirmPayment({
         elements,
         confirmParams: {
-          return_url: `${window.location.origin}/payment-confirmation`,
+          // Return to home page after 3D Secure authentication
+          // Note: redirect only happens if 3D Secure is required (redirect: 'if_required')
+          return_url: window.location.origin,
           payment_method_data: {
             billing_details: {
               name: appointment.customerName,
@@ -194,13 +196,15 @@ export function PaymentCheckout({
           setPaymentStatus('idle');
         } else {
           setPaymentStatus('error');
-          setErrorMessage(error || 'Failed to initialize payment. Please try again.');
+          setErrorMessage('Failed to initialize payment. Please try again.');
         }
       };
 
       initializePayment();
     }
-  }, [isOpen, clientSecret, stripePromise, createPaymentIntent, totalAmount, appointment, error]);
+    // Note: 'error' is intentionally excluded from deps to prevent infinite loop
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, clientSecret, stripePromise, createPaymentIntent, totalAmount, appointment]);
 
   // Reset state when dialog closes
   useEffect(() => {

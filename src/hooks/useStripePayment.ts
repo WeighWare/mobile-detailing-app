@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { loadStripe, Stripe, StripeElements } from '@stripe/stripe-js';
+import { loadStripe } from '@stripe/stripe-js';
 
 const stripePublishableKey = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY;
 
@@ -17,12 +17,6 @@ const stripePromise = stripePublishableKey ? loadStripe(stripePublishableKey) : 
 export interface PaymentIntentResult {
   clientSecret: string;
   paymentIntentId: string;
-}
-
-export interface PaymentResult {
-  success: boolean;
-  paymentIntentId?: string;
-  error?: string;
 }
 
 export function useStripePayment() {
@@ -77,70 +71,10 @@ export function useStripePayment() {
     }
   }, []);
 
-  /**
-   * Confirm a payment using Stripe Elements
-   */
-  const confirmPayment = useCallback(async (
-    stripe: Stripe,
-    elements: StripeElements,
-    clientSecret: string,
-    customerName: string,
-    customerEmail: string
-  ): Promise<PaymentResult> => {
-    setIsLoading(true);
-    setError(null);
-
-    try {
-      const { error: submitError } = await elements.submit();
-      if (submitError) {
-        throw new Error(submitError.message);
-      }
-
-      const { error: confirmError, paymentIntent } = await stripe.confirmPayment({
-        elements,
-        clientSecret,
-        confirmParams: {
-          return_url: window.location.origin,
-          payment_method_data: {
-            billing_details: {
-              name: customerName,
-              email: customerEmail,
-            },
-          },
-        },
-        redirect: 'if_required',
-      });
-
-      if (confirmError) {
-        throw new Error(confirmError.message);
-      }
-
-      if (paymentIntent && paymentIntent.status === 'succeeded') {
-        return {
-          success: true,
-          paymentIntentId: paymentIntent.id,
-        };
-      }
-
-      throw new Error('Payment was not completed');
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Payment failed';
-      setError(errorMessage);
-      console.error('Error confirming payment:', err);
-      return {
-        success: false,
-        error: errorMessage,
-      };
-    } finally {
-      setIsLoading(false);
-    }
-  }, []);
-
   return {
     stripePromise,
     isLoading,
     error,
     createPaymentIntent,
-    confirmPayment,
   };
 }

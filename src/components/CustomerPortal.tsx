@@ -21,7 +21,6 @@ interface CustomerPortalProps {
   onAppointmentsUpdate: (appointments: Appointment[]) => void;
   services: Service[];
   businessSettings: BusinessSettings;
-  onProcessPayment: (appointment: Appointment, amount: number) => Promise<any>;
 }
 
 export function CustomerPortal({
@@ -29,8 +28,7 @@ export function CustomerPortal({
   customerEmail,
   onAppointmentsUpdate,
   services,
-  businessSettings,
-  onProcessPayment
+  businessSettings
 }: CustomerPortalProps) {
   const [isBookingOpen, setIsBookingOpen] = useState(false);
   const [activeTab, setActiveTab] = useState('appointments');
@@ -87,24 +85,51 @@ export function CustomerPortal({
     onAppointmentsUpdate(updatedAppointments);
   };
 
-  const handlePayment = async (appointment: Appointment) => {
-    const result = await onProcessPayment(appointment, appointment.payment?.amount || 0);
-    if (result.success) {
-      const updatedAppointments = appointments.map(apt => 
-        apt.id === appointment.id 
-          ? { 
-              ...apt, 
-              payment: { 
-                ...apt.payment,
-                status: 'paid' as const,
-                stripePaymentIntentId: result.paymentIntentId 
-              }
-            }
-          : apt
-      );
-      onAppointmentsUpdate(updatedAppointments);
-    }
-    return result;
+  const createPaymentIntentCreatedHandler = (appointmentId: string) => (paymentIntentId: string) => {
+    // Store the payment intent ID immediately when it's created
+    // This is crucial for 3D Secure flow - if user gets redirected for authentication,
+    // we need the payment intent ID stored locally to match it on return
+    const updatedAppointments = appointments.map(apt => {
+      if (apt.id !== appointmentId) return apt;
+
+      if (!apt.payment) {
+        console.error(`Payment object missing for appointment ${appointmentId}`);
+        return apt;
+      }
+
+      return {
+        ...apt,
+        payment: {
+          ...apt.payment,
+          stripePaymentIntentId: paymentIntentId
+        },
+        updatedAt: new Date().toISOString()
+      };
+    });
+    onAppointmentsUpdate(updatedAppointments);
+  };
+
+  const createPaymentSuccessHandler = (appointmentId: string) => (paymentIntentId: string) => {
+    const updatedAppointments = appointments.map(apt => {
+      if (apt.id !== appointmentId) return apt;
+
+      // Defensive check: Ensure payment object exists before updating
+      if (!apt.payment) {
+        console.error(`Payment object missing for appointment ${appointmentId}`);
+        return apt;
+      }
+
+      return {
+        ...apt,
+        payment: {
+          ...apt.payment,
+          status: 'paid' as const,
+          stripePaymentIntentId: paymentIntentId
+        },
+        updatedAt: new Date().toISOString()
+      };
+    });
+    onAppointmentsUpdate(updatedAppointments);
   };
 
   const handleRateService = (appointmentId: string, rating: number, review?: string) => {
@@ -255,7 +280,8 @@ export function CustomerPortal({
                   key={appointment.id}
                   appointment={appointment}
                   onCancel={() => handleCancelAppointment(appointment.id)}
-                  onPayment={() => handlePayment(appointment)}
+                  onPaymentSuccess={createPaymentSuccessHandler(appointment.id)}
+                  onPaymentIntentCreated={createPaymentIntentCreatedHandler(appointment.id)}
                   onRate={(rating, review) => handleRateService(appointment.id, rating, review)}
                 />
               ))}
@@ -282,7 +308,8 @@ export function CustomerPortal({
                   key={appointment.id}
                   appointment={appointment}
                   onCancel={() => handleCancelAppointment(appointment.id)}
-                  onPayment={() => handlePayment(appointment)}
+                  onPaymentSuccess={createPaymentSuccessHandler(appointment.id)}
+                  onPaymentIntentCreated={createPaymentIntentCreatedHandler(appointment.id)}
                   onRate={(rating, review) => handleRateService(appointment.id, rating, review)}
                   isHistoryView={true}
                 />

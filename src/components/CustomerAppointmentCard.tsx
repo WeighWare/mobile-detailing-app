@@ -15,6 +15,7 @@ interface CustomerAppointmentCardProps {
   appointment: Appointment;
   onCancel: () => void;
   onPaymentSuccess: (paymentIntentId: string) => void;
+  onPaymentIntentCreated: (paymentIntentId: string) => void;
   onRate: (rating: number, review?: string) => void;
   isHistoryView?: boolean;
 }
@@ -23,6 +24,7 @@ export function CustomerAppointmentCard({
   appointment,
   onCancel,
   onPaymentSuccess,
+  onPaymentIntentCreated,
   onRate,
   isHistoryView = false
 }: CustomerAppointmentCardProps) {
@@ -266,6 +268,7 @@ export function CustomerAppointmentCard({
         isOpen={showPaymentDialog}
         onClose={() => setShowPaymentDialog(false)}
         onSuccess={handlePaymentComplete}
+        onPaymentIntentCreated={onPaymentIntentCreated}
       />
     </>
   );

@@ -85,20 +85,50 @@ export function CustomerPortal({
     onAppointmentsUpdate(updatedAppointments);
   };
 
+  const createPaymentIntentCreatedHandler = (appointmentId: string) => (paymentIntentId: string) => {
+    // Store the payment intent ID immediately when it's created
+    // This is crucial for 3D Secure flow - if user gets redirected for authentication,
+    // we need the payment intent ID stored locally to match it on return
+    const updatedAppointments = appointments.map(apt => {
+      if (apt.id !== appointmentId) return apt;
+
+      if (!apt.payment) {
+        console.error(`Payment object missing for appointment ${appointmentId}`);
+        return apt;
+      }
+
+      return {
+        ...apt,
+        payment: {
+          ...apt.payment,
+          stripePaymentIntentId: paymentIntentId
+        },
+        updatedAt: new Date().toISOString()
+      };
+    });
+    onAppointmentsUpdate(updatedAppointments);
+  };
+
   const createPaymentSuccessHandler = (appointmentId: string) => (paymentIntentId: string) => {
-    const updatedAppointments = appointments.map(apt =>
-      apt.id === appointmentId
-        ? {
-            ...apt,
-            payment: {
-              ...apt.payment!,
-              status: 'paid' as const,
-              stripePaymentIntentId: paymentIntentId
-            },
-            updatedAt: new Date().toISOString()
-          }
-        : apt
-    );
+    const updatedAppointments = appointments.map(apt => {
+      if (apt.id !== appointmentId) return apt;
+
+      // Defensive check: Ensure payment object exists before updating
+      if (!apt.payment) {
+        console.error(`Payment object missing for appointment ${appointmentId}`);
+        return apt;
+      }
+
+      return {
+        ...apt,
+        payment: {
+          ...apt.payment,
+          status: 'paid' as const,
+          stripePaymentIntentId: paymentIntentId
+        },
+        updatedAt: new Date().toISOString()
+      };
+    });
     onAppointmentsUpdate(updatedAppointments);
   };
 
@@ -251,6 +281,7 @@ export function CustomerPortal({
                   appointment={appointment}
                   onCancel={() => handleCancelAppointment(appointment.id)}
                   onPaymentSuccess={createPaymentSuccessHandler(appointment.id)}
+                  onPaymentIntentCreated={createPaymentIntentCreatedHandler(appointment.id)}
                   onRate={(rating, review) => handleRateService(appointment.id, rating, review)}
                 />
               ))}
@@ -278,6 +309,7 @@ export function CustomerPortal({
                   appointment={appointment}
                   onCancel={() => handleCancelAppointment(appointment.id)}
                   onPaymentSuccess={createPaymentSuccessHandler(appointment.id)}
+                  onPaymentIntentCreated={createPaymentIntentCreatedHandler(appointment.id)}
                   onRate={(rating, review) => handleRateService(appointment.id, rating, review)}
                   isHistoryView={true}
                 />

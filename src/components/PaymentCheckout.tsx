@@ -18,6 +18,7 @@ interface PaymentCheckoutProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess: (paymentIntentId: string) => void;
+  onPaymentIntentCreated?: (paymentIntentId: string) => void;
 }
 
 /**
@@ -163,7 +164,8 @@ export function PaymentCheckout({
   appointment,
   isOpen,
   onClose,
-  onSuccess
+  onSuccess,
+  onPaymentIntentCreated
 }: PaymentCheckoutProps) {
   const { stripePromise, createPaymentIntent, isLoading, error } = useStripePayment();
   const [clientSecret, setClientSecret] = useState<string | null>(null);
@@ -194,6 +196,12 @@ export function PaymentCheckout({
         if (result) {
           setClientSecret(result.clientSecret);
           setPaymentStatus('idle');
+          // Notify parent that payment intent was created
+          // This is important for 3D Secure flow - we need to store the payment intent ID
+          // in the appointment state before the user gets redirected for authentication
+          if (onPaymentIntentCreated) {
+            onPaymentIntentCreated(result.paymentIntentId);
+          }
         } else {
           setPaymentStatus('error');
           setErrorMessage('Failed to initialize payment. Please try again.');

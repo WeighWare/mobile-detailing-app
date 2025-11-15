@@ -6,6 +6,7 @@ import { Switch } from './components/ui/switch';
 import { Calendar, Users, Settings } from 'lucide-react';
 import { OwnerDashboard } from './components/OwnerDashboard';
 import { CustomerPortal } from './components/CustomerPortal';
+import { PaymentReturnHandler } from './components/PaymentReturnHandler';
 import { NotificationService } from './components/NotificationService';
 import { PaymentService } from './components/PaymentService';
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -556,6 +557,25 @@ function AppContent() {
     setBusinessSettings(prev => ({ ...prev, ...newSettings }));
   }, []);
 
+  // Handle payment success from 3D Secure redirect
+  const handlePaymentReturnSuccess = useCallback((paymentIntentId: string) => {
+    // Find the appointment with this payment intent ID
+    const updatedAppointments = appointments.map(apt => {
+      if (apt.payment?.stripePaymentIntentId === paymentIntentId) {
+        return {
+          ...apt,
+          payment: {
+            ...apt.payment,
+            status: 'paid' as const,
+          },
+          updatedAt: new Date().toISOString()
+        };
+      }
+      return apt;
+    });
+    setAppointments(updatedAppointments);
+  }, [appointments]);
+
   // Show enhanced loading state
   if (isLoading) {
     return (
@@ -640,14 +660,18 @@ function AppContent() {
             notificationService={notificationService}
           />
         ) : (
-          <CustomerPortal
-            key="customer-portal"
-            appointments={appointments}
-            customerEmail={customerEmail}
-            onAppointmentsUpdate={handleAppointmentUpdate}
-            services={activeServices}
-            businessSettings={businessSettings}
-          />
+          <>
+            <CustomerPortal
+              key="customer-portal"
+              appointments={appointments}
+              customerEmail={customerEmail}
+              onAppointmentsUpdate={handleAppointmentUpdate}
+              services={activeServices}
+              businessSettings={businessSettings}
+            />
+            {/* Handle return from 3D Secure authentication */}
+            <PaymentReturnHandler onPaymentSuccess={handlePaymentReturnSuccess} />
+          </>
         )}
       </main>
 
